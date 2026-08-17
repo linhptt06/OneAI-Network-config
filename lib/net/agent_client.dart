@@ -80,7 +80,7 @@ class AgentClient {
     }
     if (!capabilities.toolNames.contains(tool)) {
       throw AgentErrorException(
-        'unsupported_tool',
+        kUnsupportedToolCode,
         'Thiết bị này không hỗ trợ "$tool".',
       );
     }

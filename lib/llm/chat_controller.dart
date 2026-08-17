@@ -5,8 +5,9 @@ import 'package:llamadart/llamadart.dart';
 
 import '../data/chat_database.dart';
 import '../data/chat_models.dart';
+import '../net/tool_host.dart';
 import 'llm_service.dart';
-import 'secrets.dart';
+import 'net_tools.dart';
 
 /// The "act, do not announce" rule exists because a 1.5B model tends to reply
 /// "Đang kiểm tra..." and stop, instead of emitting the call. Stating the
@@ -39,12 +40,11 @@ const String kSystemPrompt =
 /// the reply itself, and several of those in the window crowd out the tool
 /// schemas. The UI still shows the full text; only the copy the model re-reads
 /// on later turns is capped.
-const int kMaxReplayedToolResultChars = 700;
 
 /// Prepares a stored row for replay, shortening over-long tool results.
 LlamaChatMessage _replayable(StoredMessage message) {
   if (message.kind != StoredMessageKind.toolResult ||
-      message.content.length <= kMaxReplayedToolResultChars) {
+      message.content.length <= kMaxToolResultChars) {
     return message.toLlamaMessage();
   }
   return LlamaChatMessage.withContent(
@@ -53,9 +53,7 @@ LlamaChatMessage _replayable(StoredMessage message) {
       LlamaToolResultContent(
         id: message.toolCallId,
         name: message.toolName ?? '',
-        result:
-            '${message.content.substring(0, kMaxReplayedToolResultChars)}'
-            '… [đã cắt bớt — gọi lại công cụ nếu cần đầy đủ]',
+        result: truncateToolResult(message.content),
       ),
     ],
   );
@@ -68,12 +66,21 @@ class ChatController extends ChangeNotifier {
     required this.database,
     required this.llm,
     required this.tools,
+    required this.toolHost,
     required this.conversationId,
   });
 
   final ChatDatabase database;
   final LlmService llm;
+
+  /// The whole tool catalogue. What is offered to the model on a given round is
+  /// narrowed from it by [toolsFor]; see [send].
   final List<ToolDefinition> tools;
+
+  /// Read here for one reason: the connected device decides which read tools
+  /// belong in the prompt.
+  final ToolHost toolHost;
+
   final int conversationId;
 
   List<StoredMessage> _messages = [];
@@ -158,6 +165,9 @@ class ChatController extends ChangeNotifier {
         llm: llm,
         messages: replayed,
         tools: tools,
+        // Evaluated per round by the turn loop, so a connect_device call made
+        // in this same turn unlocks the device's read tools for the next round.
+        provideTools: () => toolsFor(tools, toolHost.deviceToolNames),
       )) {
         switch (event) {
           case TextDelta(:final text):
@@ -191,9 +201,18 @@ class ChatController extends ChangeNotifier {
             await database.insertMessage(
               conversationId: conversationId,
               kind: StoredMessageKind.toolResult,
-              // The model was handed the real value in-memory; what lands on
-              // disk has WiFi passphrases replaced with dots.
-              content: redactSecrets(result),
+              // Stored verbatim. No read tool returns a secret: the agent's
+              // wifi_get does not read the passphrase, which is what makes the
+              // claim in its description and in rule 8 true rather than merely
+              // asserted. A redaction layer used to sit here for a value nothing
+              // ever produced — it was removed because a protection that never
+              // fires is indistinguishable from one that does not exist, and it
+              // told the model to call a tool for a passphrase it cannot get.
+              //
+              // A write tool that echoes a staged passphrase back would change
+              // this. That is the point to reintroduce redaction, on the value
+              // the app itself supplied — not on the agent's output.
+              content: result,
               toolName: name,
               toolCallId: id,
             );

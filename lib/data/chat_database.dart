@@ -15,7 +15,7 @@ class ChatDatabase {
 
   /// The underlying handle, so sibling stores (device profiles) can share the
   /// same database file instead of opening a second one.
-  Database get raw => _db;
+  Database get raw => _db; 
 
   static Future<ChatDatabase> open() async {
     final dir = await getApplicationDocumentsDirectory();
@@ -123,7 +123,7 @@ class ChatDatabase {
   /// alongside `contextSize`.
   Future<List<StoredMessage>> recentMessages(
     int conversationId, {
-    int limit = 10,
+    int limit = 12,
   }) async {
     final rows = await _db.query(
       'messages',

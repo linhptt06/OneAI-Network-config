@@ -32,6 +32,10 @@ class McpServerInfo {
 ///
 /// The distinction matters for what the model does next: a bad section name is
 /// worth retrying with a different name, a dead ubus is not.
+///
+/// Third group, [kUnsupportedToolCode], sits in `agent_protocol.dart` because
+/// both wire protocols raise it. Anything reading these sets must handle all
+/// three, or a code falls through to "wrong parameter" advice it has no use for.
 const Set<String> kRouterFaultCodes = {
   'backend_unavailable',
   'backend_failed',
@@ -127,7 +131,7 @@ class McpClient {
     }
     if (!server.toolNames.contains(name)) {
       throw AgentErrorException(
-        'unsupported_tool',
+        kUnsupportedToolCode,
         'Thiết bị này không hỗ trợ "$name".',
       );
     }

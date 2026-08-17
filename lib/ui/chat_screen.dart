@@ -41,6 +41,7 @@ class _ChatScreenState extends State<ChatScreen> {
       database: widget.database,
       llm: widget.llm,
       tools: widget.tools,
+      toolHost: widget.toolHost,
       conversationId: widget.conversation.id,
     )..addListener(_onControllerChanged);
     _controller.loadHistory();
@@ -64,6 +65,10 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!mounted) return;
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Checked again here, not just above: this body runs a frame later, and
+      // leaving the screen while a tool result is streaming in disposes _scroll
+      // in between.
+      if (!mounted) return;
       if (_scroll.hasClients) {
         _scroll.animateTo(
           _scroll.position.maxScrollExtent,

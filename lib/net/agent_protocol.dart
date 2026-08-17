@@ -277,6 +277,22 @@ class AgentErrorException implements Exception {
   String toString() => '[$code] $message';
 }
 
+/// The device has no such tool at all.
+///
+/// Lives here rather than with the other error-code groups in `mcp_client.dart`
+/// because both wire protocols raise it — the MCP client from `tools/list`, the
+/// staged-write client from its `list` reply — and neither should have to depend
+/// on the other to name it.
+///
+/// Deliberately not folded into `kRouterFaultCodes`, even though both mean "stop
+/// calling this tool": a dead ubus may answer on the next turn, a capability the
+/// firmware does not have never will, and the model has to tell the user which
+/// one it hit. What it must not do is retry with a different argument — no
+/// argument can rescue a tool that is not there.
+const String kUnsupportedToolCode = 'unsupported_tool';
+
+bool isUnsupportedTool(String code) => code == kUnsupportedToolCode;
+
 /// Builds the request body for [method].
 Map<String, dynamic> buildRequest(
   AgentMethod method, {
@@ -290,7 +306,7 @@ Map<String, dynamic> buildRequest(
   'token': ?token,
 };
 
-/// Parses the agent's raw stdout into the response envelope.
+/// Parses the agent's raw stdout into the response envelope (JSON data)
 ///
 /// Agents run on busybox and can emit warnings before the payload, so parsing
 /// starts at the first `{`. Anything that still fails to decode is reported

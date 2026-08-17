@@ -1,5 +1,6 @@
 import 'package:llamadart/llamadart.dart';
 
+import '../net/agent_client.dart';
 import '../net/agent_protocol.dart';
 import '../net/device_profile.dart';
 import '../net/mcp_client.dart';
@@ -30,14 +31,49 @@ List<ToolDefinition> buildNetworkTools(DeviceStore store, ToolHost host) => [
   _trafficStats(host),
 ];
 
-/// The read tools this build knows how to drive, for reporting what a given
-/// device is missing.
+/// The read tools this build knows how to drive.
+///
+/// Doubles as the local/remote boundary: every name in here runs on the router
+/// (and therefore calls `host.requireClient()`), everything else in the
+/// catalogue runs on the phone. [toolsFor] relies on that, and so does the
+/// `unavailable_tools` report in `connect_device`.
 const Set<String> kReadToolNames = {
   'network_get',
   'wifi_get',
   'route_info',
   'traffic_stats',
 };
+
+/// The tools worth putting in the prompt for the current connection state.
+///
+/// [catalogue] is the whole list from [buildNetworkTools]; the return value is
+/// the subset whose schemas earn their tokens right now:
+///
+/// - **Not connected:** local tools only. A read tool here can do nothing but
+///   throw "Chưa kết nối tới thiết bị nào", so its schema costs context on
+///   every turn and offers the model a round it cannot win.
+/// - **Connected:** local tools, plus the read tools *this* device declares.
+///   A tool the firmware does not have stops being offered at all, instead of
+///   being called and answered with `unsupported_tool`.
+///
+/// The catalogue is split before filtering, not filtered whole. `list_devices`
+/// and `connect_device` run on the phone, so the router never names them —
+/// handing the full catalogue to [negotiateTools] would drop the one tool the
+/// model needs to connect in the first place, and there would be no way back.
+///
+/// Only names cross the boundary here: every description and parameter schema
+/// still comes from this file. See [negotiateTools].
+List<ToolDefinition> toolsFor(
+  List<ToolDefinition> catalogue,
+  Set<String> deviceToolNames,
+) {
+  final local = catalogue.where((t) => !kReadToolNames.contains(t.name));
+  final remote = negotiateTools(
+    catalogue.where((t) => kReadToolNames.contains(t.name)).toList(),
+    deviceToolNames,
+  );
+  return [...local, ...remote];
+}
 
 // Defaults, so the model has something valid to send when the user asks a
 // general question. The model cannot discover these: the agent exposes no tool
@@ -92,6 +128,10 @@ ToolDefinition _listDevices(DeviceStore store) => ToolDefinition(
   },
 );
 
+/// Kết nối tới router. Tham số `device` là chỗ yếu nhất của cả file: nó là tham
+/// số tự do duy nhất, lại là tham số model buộc phải điền đúng. Alias sai hiện
+/// đi thẳng ra ngoài thành `{'error': ...}` trần, không `hint`, không
+/// `valid_values` — xem W1 trong `docs/RA-SOAT-TOOL-SCHEMA.md`.
 ToolDefinition _connectDevice(DeviceStore store, ToolHost host) =>
     ToolDefinition(
       name: 'connect_device',
@@ -111,9 +151,20 @@ ToolDefinition _connectDevice(DeviceStore store, ToolHost host) =>
         final session = await connectByAlias(store, alias);
         final client = McpClient(SshMcpTransport(session.client));
 
-        // The device describes itself here — identity and supported tools in
-        // one exec, instead of the app probing for them.
-        final server = await client.connect();
+        final McpServerInfo server;
+        try {
+          // The device describes itself here — identity and supported tools in
+          // one exec, instead of the app probing for them.
+          server = await client.connect();
+        } catch (_) {
+          // Between connectByAlias and adopt, the session is live but unowned:
+          // ToolHost does not hold it yet, so nothing would ever close it. A
+          // router without the agent installed fails exactly here, and the model
+          // is told to retry — so this leaked one SSH connection per attempt,
+          // for the rest of the app's life.
+          await session.close();
+          rethrow;
+        }
         await host.adopt(session, client);
 
         final missing = kReadToolNames.difference(server.toolNames);
@@ -123,8 +174,10 @@ ToolDefinition _connectDevice(DeviceStore store, ToolHost host) =>
           'agent': server.name,
           'agent_version': server.version,
           'supported_tools': server.toolNames.toList()..sort(),
-          // Named so the model does not spend a round trip discovering that a
-          // tool it can see is unavailable on this particular router.
+          // Not what keeps the model from calling a missing tool — [toolsFor]
+          // does that by not offering it. This is the *explanation* for the
+          // absence, so the model can say "router này không đọc được lưu
+          // lượng" instead of being silently unable to.
           if (missing.isNotEmpty)
             'unavailable_tools': missing.toList()..sort(),
         };
@@ -246,7 +299,7 @@ ToolDefinition _readTool(
         // Returned as data rather than thrown. The turn loop would also hand a
         // thrown error to the model, but without the hint — and the hint is
         // what stops a small model from retrying a call that cannot succeed.
-        return _explainFailure(error, choices);
+        return explainAgentError(error, choices);
       }
     },
   );
@@ -257,17 +310,40 @@ ToolDefinition _readTool(
 /// [choices] is repeated back on failure because the model has no tool that
 /// lists valid names, and by the time an error arrives the tool description may
 /// have fallen out of its context window.
-Map<String, dynamic> _explainFailure(
+///
+/// Public so the contract it defines can be tested. Nothing else calls it: this
+/// is the only shape a failed read reaches the model in, and the hint inside it
+/// is the only thing that tells a 1.5B model whether to retry or to stop.
+Map<String, dynamic> explainAgentError(
   AgentErrorException error,
   List<String>? choices,
-) => {
-  'error': error.code,
-  'message': error.message,
-  'hint': _hintFor(error.code, choices),
-  'valid_values': ?choices,
-};
+) {
+  // Withheld when the tool itself is absent, even though the values are still
+  // valid names. A list of alternatives sitting next to "đừng gọi lại" reads as
+  // an invitation to try the next one, and with a small model the data wins over
+  // the prose. Nothing in valid_values can fix a tool the firmware lacks.
+  final worthRetrying = !isUnsupportedTool(error.code);
 
-String _hintFor(String code, List<String>? choices) {
+  return {
+    'error': error.code,
+    'message': error.message,
+    'hint': hintForAgentError(error.code, choices),
+    if (worthRetrying && choices != null) 'valid_values': choices,
+  };
+}
+
+/// The advice attached to [code]: retry, or stop and say why.
+String hintForAgentError(String code, List<String>? choices) {
+  if (isUnsupportedTool(code)) {
+    // Used to fall through to the "wrong parameter" branch below, which sent the
+    // model hunting for another section name on a tool that does not exist on
+    // this device — the exact wasted turn the rest of this file is built to
+    // prevent.
+    return 'Thiết bị này không có chức năng đó, và lượt sau cũng vậy. Đừng gọi '
+        'lại công cụ này và đừng thử tên khác; hãy nói với người dùng là router '
+        'không hỗ trợ việc này.';
+  }
+
   if (isRouterFault(code)) {
     return 'Đây là sự cố phía router, không phải do tham số sai. Đừng gọi lại '
         'công cụ này; hãy báo người dùng.';

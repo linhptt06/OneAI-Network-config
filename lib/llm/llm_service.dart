@@ -6,8 +6,6 @@ import 'package:llamadart/llamadart.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-import 'secrets.dart';
-
 /// Default model: small enough for a phone, and its chat template renders
 /// `<tool_call>` / `<tool_response>`, which is what makes tool calling work.
 ///
@@ -18,7 +16,7 @@ import 'secrets.dart';
 /// The bottleneck was memory pressure, not model size as such — a phone with
 /// 8 GB runs 3B comfortably.
 const String kDefaultModelSource =
-    'hf://Qwen/Qwen2.5-1.5B-Instruct-GGUF/qwen2.5-1.5b-instruct-q4_k_m.gguf';
+    'hf://Qwen/Qwen2.5-3B-Instruct-GGUF/qwen2.5-3b-instruct-q4_k_m.gguf';
 
 /// Alternatives, with measured file sizes.
 ///
@@ -113,13 +111,7 @@ class LlmService extends ChangeNotifier {
       await engine.loadModelSource(
         ModelSource.parse(_modelSource),
         modelParams: const ModelParams(
-          // Back to 4096. The 8 tool schemas plus system prompt come to about
-          // 1.2k tokens, leaving ~2.8k for history and the reply, which the
-          // 10-message window fits. 8192 doubled the KV cache and slowed
-          // prefill for headroom that was not being used.
-          contextSize: 4096,
-          // CPU-only: Android GPU offload through llama.cpp is unreliable
-          // across vendors, and a 1.5B Q4 model is fast enough on CPU.
+          contextSize: 8192,
           gpuLayers: 0,
         ),
         options: ModelLoadOptions(cacheDirectory: cacheDir),
@@ -242,11 +234,44 @@ class _ToolCallBuilder {
 /// The loop stops when the model answers without asking for a tool, or after
 /// [maxToolRounds] rounds — the bound guards against a model that keeps
 /// re-requesting the same tool forever.
+///
+/// Two tool lists, deliberately:
+///
+/// - [tools] is the whole catalogue, and it is what a requested name is looked
+///   up in. A tool that was not offered this round still runs if the model asks
+///   for it, so it can answer with its own `hint` and `valid_values` instead of
+///   a bare "no such tool".
+/// - [provideTools] returns the subset whose schemas go into the prompt, and is
+///   called again at the start of *every* round rather than once per turn:
+///   `connect_device` runs inside a turn, so the round after it must be able to
+///   offer the read tools it just unlocked. Defaults to the whole catalogue.
+///
+/// Changing the offered set mid-turn invalidates the prompt prefix and makes
+/// llama.cpp prefill again, which is the largest cost on a phone. It is paid
+/// only on connect and disconnect — a few times per session — so it amortises.
+/// If measurement says otherwise, freeze the set for the whole turn and accept
+/// that connect + read takes two turns.
+const GenerationParams kTurnParams = GenerationParams(
+  maxTokens: 768,
+  temp: 0.0,
+  topK: 0,
+  topP: 1.0,
+  penalty: 1.0,
+);
+
+
+const int kMaxToolResultChars = 1500;
+String truncateToolResult(String result) => result.length <= kMaxToolResultChars
+    ? result
+    : '${result.substring(0, kMaxToolResultChars)}'
+        '… [đã cắt bớt — gọi lại công cụ nếu cần đầy đủ]';
+
 Stream<TurnEvent> runChatTurn({
   required LlmService llm,
   required List<LlamaChatMessage> messages,
   required List<ToolDefinition> tools,
-  GenerationParams params = const GenerationParams(maxTokens: 512),
+  List<ToolDefinition> Function()? provideTools,
+  GenerationParams params = kTurnParams,
   int maxToolRounds = 4,
 }) async* {
   if (!llm.beginTurn()) {
@@ -263,6 +288,7 @@ Stream<TurnEvent> runChatTurn({
       engine: llm.engine,
       messages: messages,
       tools: tools,
+      provideTools: provideTools ?? () => tools,
       params: params,
       maxToolRounds: maxToolRounds,
     );
@@ -277,6 +303,7 @@ Stream<TurnEvent> _runChatTurnLocked({
   required LlamaEngine engine,
   required List<LlamaChatMessage> messages,
   required List<ToolDefinition> tools,
+  required List<ToolDefinition> Function() provideTools,
   required GenerationParams params,
   required int maxToolRounds,
 }) async* {
@@ -289,11 +316,16 @@ Stream<TurnEvent> _runChatTurnLocked({
     // answer with what it already has instead of looping again.
     final offerTools = round < maxToolRounds;
 
+    // Asked again every round, not once per turn: a tool called in this turn
+    // can change what is available for the next round — connecting to a device
+    // is exactly that.
+    final offered = offerTools ? provideTools() : null;
+
     await for (final chunk in engine.create(
       messages,
       params: params,
-      tools: offerTools ? tools : null,
-      toolChoice: offerTools ? ToolChoice.auto : ToolChoice.none,
+      tools: offered,
+      toolChoice: offered == null ? ToolChoice.none : ToolChoice.auto,
     )) {
       if (chunk.choices.isEmpty) continue;
       final delta = chunk.choices.first.delta;
@@ -359,6 +391,10 @@ Stream<TurnEvent> _runChatTurnLocked({
 
       String result;
       var failed = false;
+      // Looked up in the whole catalogue, not in what was offered this round.
+      // Offering less is a token saving; refusing a call the model still
+      // remembers from earlier in the conversation gains nothing, and costs the
+      // tool's own hint — which is the thing that tells the model to stop.
       final tool = tools.where((t) => t.name == name).firstOrNull;
       if (tool == null) {
         failed = true;
@@ -385,12 +421,10 @@ Stream<TurnEvent> _runChatTurnLocked({
         LlamaChatMessage.withContent(
           role: LlamaChatRole.tool,
           content: [
-            // The model needs the real value to answer; the marker is only a
-            // signal to the persistence layer, so it is dropped here.
             LlamaToolResultContent(
               id: id,
               name: name,
-              result: stripSecretMarkers(result),
+              result: truncateToolResult(result),
             ),
           ],
         ),

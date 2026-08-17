@@ -39,6 +39,8 @@ class SshAgentTransport implements AgentTransport {
 
   @override
   Future<Map<String, dynamic>> send(Map<String, dynamic> request) async {
+    //Validate chống shell injection, chỉ chấp nhận ký tự thường a-z và dấu gạch dưới
+    //method là thành phần được đưa vào chuỗi lệnh SSH trên terminal nên validate lại đi không chèn ký tự độc
     final method = request['method'];
     if (method is! String || method.isEmpty) {
       throw ArgumentError('Yêu cầu thiếu trường "method".');
@@ -51,8 +53,11 @@ class SshAgentTransport implements AgentTransport {
       throw ArgumentError('Tên method không hợp lệ: $method');
     }
 
+    //Thực thi tiến trình SSH
     final session = await _client.execute('$agentPath call $method');
 
+    //Đọc và ghi dữ liệu thông qua stdin và stdout/stderr
+    //Chuyển toàn bộ request thành chuỗi JSON và đẩy qua stdin của tiến trình SSH
     final stdoutBytes = BytesBuilder();
     final stderrBytes = BytesBuilder();
     final collecting = Future.wait([
@@ -64,7 +69,7 @@ class SshAgentTransport implements AgentTransport {
     // The agent reads until EOF, so stdin must be closed or both sides wait
     // for each other until the timeout fires.
     await session.stdin.close();
-
+    //Xử lý timeout khi agent không phản hồi. Nếu agent bị treo hoặc không phản hồi thì đóng phiên làm việc
     try {
       await collecting.timeout(timeout);
       await session.waitForExit(timeout: timeout);
@@ -74,6 +79,7 @@ class SshAgentTransport implements AgentTransport {
         'Agent không phản hồi sau ${timeout.inSeconds}s.',
       );
     }
+
 
     final stdout = utf8.decode(stdoutBytes.takeBytes(), allowMalformed: true);
     final stderr = utf8.decode(stderrBytes.takeBytes(), allowMalformed: true);
@@ -90,12 +96,12 @@ class SshAgentTransport implements AgentTransport {
       );
     }
 
-    return decodeEnvelope(stdout);
+    return decodeEnvelope(stdout); //trả về dữ liệu dạng JSON nếu hợp lệ, gửi lỗi nếu không hợp lệ
   }
 }
 
 /// In-memory transport for tests and for exercising the client before the
-/// agent exists.
+/// agent exists. Giả lập môi trường transport và phục vụ kiểm thử
 class FakeAgentTransport implements AgentTransport {
   FakeAgentTransport(this._handler);
 

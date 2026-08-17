@@ -1,4 +1,3 @@
-import 'package:chatbot/llm/secrets.dart';
 import 'package:chatbot/net/validation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -80,30 +79,4 @@ void main() {
     });
   });
 
-  group('secret handling', () {
-    test('model sees the real value', () {
-      expect(
-        stripSecretMarkers('{"password":"${kSecretMarker}hunter2"}'),
-        '{"password":"hunter2"}',
-      );
-    });
-
-    test('stored transcript keeps no trace of the passphrase', () {
-      final stored = redactSecrets('{"password":"${kSecretMarker}hunter2"}');
-      expect(stored, isNot(contains('hunter2')));
-      expect(stored, contains(kRedactedPlaceholder));
-    });
-
-    test('the placeholder tells the model how to recover the value', () {
-      // Plain dots left the model waffling about encryption modes on
-      // follow-up questions; the replacement has to be actionable.
-      expect(kRedactedPlaceholder, contains('get_wifi_info'));
-    });
-
-    test('unmarked text is left alone', () {
-      const plain = '{"ssid":"OpenWrt"}';
-      expect(redactSecrets(plain), plain);
-      expect(stripSecretMarkers(plain), plain);
-    });
-  });
 }

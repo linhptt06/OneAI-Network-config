@@ -37,11 +37,15 @@ class _ChatbotAppState extends State<ChatbotApp> {
   /// here so the session survives navigation between screens.
   final _toolHost = ToolHost();
 
-  /// The tools offered to the model.
+  /// The full tool catalogue — every tool this build can execute.
   ///
-  /// Keep this list short. A 1.5B model degrades as it grows: with four extra
-  /// demo tools present it began narrating intent ("đang kiểm tra…") instead
-  /// of emitting a call, because the schemas crowded the context window.
+  /// Not the list the model sees: `toolsFor` narrows this per round to the tools
+  /// the current connection can actually serve, so nothing is built here that
+  /// depends on which device is connected.
+  ///
+  /// Keep this list short anyway. A 1.5B model degrades as it grows: with four
+  /// extra demo tools present it began narrating intent ("đang kiểm tra…")
+  /// instead of emitting a call, because the schemas crowded the context window.
   late final List<ToolDefinition> _tools = buildNetworkTools(
     widget.deviceStore,
     _toolHost,

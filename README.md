@@ -6,6 +6,9 @@ dịch vụ ngoài: model chạy trên máy, router được điều khiển qua
 
 > Chưa quen thuật ngữ? Xem [docs/THUAT-NGU.md](docs/THUAT-NGU.md) — giải thích
 > mọi thuật ngữ dùng trong mã nguồn, kèm ví dụ lấy từ chính dự án.
+>
+> Mới tải mã về? Xem [docs/HUONG-DAN-MA-NGUON.md](docs/HUONG-DAN-MA-NGUON.md) —
+> đi qua từng tệp trong `lib/` và `test/`: chứa gì, làm gì, vì sao viết như vậy.
 
 ## Kiến trúc
 
