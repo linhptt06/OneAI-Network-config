@@ -30,13 +30,45 @@ class DeviceProfile {
   );
 
   /// What the model is allowed to see about this device.
-  Map<String, Object?> toModelJson() => {
-    'alias': alias,
-    'host': host,
-    'port': port,
-    'username': username,
-  };
+  Map<String, Object?> toModelJson() => {'alias': alias};
 }
+
+/// Resolves a name supplied in a chat request to one saved device alias.
+///
+/// The model occasionally emits the generic word `router` instead of the
+/// saved alias (for example `oneai`). Treating that as an automatic failure
+/// makes a one-router setup need a second model turn. We accept a shortened
+/// name when it identifies exactly one saved device, and fall back to the
+/// only saved device when there is one. Anything ambiguous still returns null
+/// so the caller never connects to an arbitrary router.
+String? resolveDeviceAlias(String requestedAlias, Iterable<String> aliases) {
+  final requested = _normaliseAlias(requestedAlias);
+  if (requested.isEmpty) return null;
+
+  final candidates = aliases.toList(growable: false);
+  final exact = candidates
+      .where((alias) => _normaliseAlias(alias) == requested)
+      .toList(growable: false);
+  if (exact.length == 1) return exact.single;
+
+  final requestedWords = requested.split(' ');
+  final partial = candidates
+      .where((alias) {
+        final aliasWords = _normaliseAlias(alias).split(' ');
+        return requestedWords.every(aliasWords.contains);
+      })
+      .toList(growable: false);
+  if (partial.length == 1) return partial.single;
+
+  // There is no alternative device to accidentally select. This makes a
+  // generic model argument such as "router" work with a saved alias such as
+  // "oneai", while retaining strict matching as soon as a second device is
+  // configured.
+  return candidates.length == 1 ? candidates.single : null;
+}
+
+String _normaliseAlias(String value) =>
+    value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
 
 /// Stores device profiles, splitting secrets from non-secrets.
 class DeviceStore {
@@ -107,10 +139,7 @@ class DeviceStore {
 
     // A null password on edit means "keep the stored one" rather than "clear".
     if (password != null) {
-      await _secure.write(
-        key: '$_passwordKeyPrefix$deviceId',
-        value: password,
-      );
+      await _secure.write(key: '$_passwordKeyPrefix$deviceId', value: password);
     }
 
     return DeviceProfile(

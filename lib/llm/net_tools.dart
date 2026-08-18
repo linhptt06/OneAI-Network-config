@@ -26,23 +26,32 @@ List<ToolDefinition> buildNetworkTools(DeviceStore store, ToolHost host) => [
   _listDevices(store),
   _connectDevice(store, host),
   _networkGet(host),
+  _networkList(host),
   _wifiGet(host),
   _routeInfo(host),
   _trafficStats(host),
+  _networkSetPreview(store, host),
 ];
 
-/// The read tools this build knows how to drive.
+/// The only router tools that may ever be exposed to the LLM.
 ///
 /// Doubles as the local/remote boundary: every name in here runs on the router
 /// (and therefore calls `host.requireClient()`), everything else in the
 /// catalogue runs on the phone. [toolsFor] relies on that, and so does the
 /// `unavailable_tools` report in `connect_device`.
-const Set<String> kReadToolNames = {
+const Set<String> kLlmRouterToolNames = {
   'network_get',
+  'network_list',
   'wifi_get',
   'route_info',
   'traffic_stats',
+  // This is the only network-changing action the model can request. Its
+  // handler performs the preview and presents the native confirmation dialog.
+  'network_set_preview',
 };
+
+/// Backward-compatible name used by existing capability tests.
+const Set<String> kReadToolNames = kLlmRouterToolNames;
 
 /// The tools worth putting in the prompt for the current connection state.
 ///
@@ -52,7 +61,7 @@ const Set<String> kReadToolNames = {
 /// - **Not connected:** local tools only. A read tool here can do nothing but
 ///   throw "Chưa kết nối tới thiết bị nào", so its schema costs context on
 ///   every turn and offers the model a round it cannot win.
-/// - **Connected:** local tools, plus the read tools *this* device declares.
+/// - **Connected:** local tools, plus the router tools *this* device declares.
 ///   A tool the firmware does not have stops being offered at all, instead of
 ///   being called and answered with `unsupported_tool`.
 ///
@@ -67,9 +76,9 @@ List<ToolDefinition> toolsFor(
   List<ToolDefinition> catalogue,
   Set<String> deviceToolNames,
 ) {
-  final local = catalogue.where((t) => !kReadToolNames.contains(t.name));
+  final local = catalogue.where((t) => !kLlmRouterToolNames.contains(t.name));
   final remote = negotiateTools(
-    catalogue.where((t) => kReadToolNames.contains(t.name)).toList(),
+    catalogue.where((t) => kLlmRouterToolNames.contains(t.name)).toList(),
     deviceToolNames,
   );
   return [...local, ...remote];
@@ -132,57 +141,64 @@ ToolDefinition _listDevices(DeviceStore store) => ToolDefinition(
 /// số tự do duy nhất, lại là tham số model buộc phải điền đúng. Alias sai hiện
 /// đi thẳng ra ngoài thành `{'error': ...}` trần, không `hint`, không
 /// `valid_values` — xem W1 trong `docs/RA-SOAT-TOOL-SCHEMA.md`.
-ToolDefinition _connectDevice(DeviceStore store, ToolHost host) =>
-    ToolDefinition(
-      name: 'connect_device',
-      description:
-          'Kết nối SSH tới một router OpenWrt theo bí danh, và đặt nó làm '
-          'thiết bị đang làm việc. Phải gọi tool này trước mọi thao tác đọc '
-          'khác.',
-      parameters: [
-        ToolParam.string(
-          'device',
-          description: 'Bí danh thiết bị, lấy từ list_devices',
-          required: true,
-        ),
-      ],
-      handler: (params) async {
-        final alias = params.getRequiredString('device');
-        final session = await connectByAlias(store, alias);
-        final client = McpClient(SshMcpTransport(session.client));
+ToolDefinition _connectDevice(
+  DeviceStore store,
+  ToolHost host,
+) => ToolDefinition(
+  name: 'connect_device',
+  description:
+      'Kết nối SSH tới một router OpenWrt theo bí danh, và đặt nó làm '
+      'thiết bị đang làm việc. Trước khi gọi, phải dùng list_devices và '
+      'truyền đúng trường alias trong kết quả; từ “router” hoặc “thiết bị” '
+      'trong câu người dùng không phải là bí danh.',
+  parameters: [
+    ToolParam.string(
+      'device',
+      description: 'Giá trị alias chính xác, lấy từ list_devices',
+      required: true,
+    ),
+  ],
+  handler: (params) async {
+    final alias = params.getRequiredString('device');
+    final session = await connectByAlias(store, alias);
+    final client = McpClient(SshMcpTransport(session.client));
 
-        final McpServerInfo server;
-        try {
-          // The device describes itself here — identity and supported tools in
-          // one exec, instead of the app probing for them.
-          server = await client.connect();
-        } catch (_) {
-          // Between connectByAlias and adopt, the session is live but unowned:
-          // ToolHost does not hold it yet, so nothing would ever close it. A
-          // router without the agent installed fails exactly here, and the model
-          // is told to retry — so this leaked one SSH connection per attempt,
-          // for the rest of the app's life.
-          await session.close();
-          rethrow;
-        }
-        await host.adopt(session, client);
+    final McpServerInfo server;
+    try {
+      // The device describes itself here — identity and supported tools in
+      // one exec, instead of the app probing for them.
+      server = await client.connect();
+    } catch (_) {
+      // Between connectByAlias and adopt, the session is live but unowned:
+      // ToolHost does not hold it yet, so nothing would ever close it. A
+      // router without the agent installed fails exactly here, and the model
+      // is told to retry — so this leaked one SSH connection per attempt,
+      // for the rest of the app's life.
+      await session.close();
+      rethrow;
+    }
+    await host.adopt(session, client);
 
-        final missing = kReadToolNames.difference(server.toolNames);
-        return {
-          'connected': true,
-          'device': alias,
-          'agent': server.name,
-          'agent_version': server.version,
-          'supported_tools': server.toolNames.toList()..sort(),
-          // Not what keeps the model from calling a missing tool — [toolsFor]
-          // does that by not offering it. This is the *explanation* for the
-          // absence, so the model can say "router này không đọc được lưu
-          // lượng" instead of being silently unable to.
-          if (missing.isNotEmpty)
-            'unavailable_tools': missing.toList()..sort(),
-        };
-      },
-    );
+    // `tools/list` is the router's capability report, not the app's
+    // catalogue. Only report the intersection: a newer router may expose
+    // a name this build has no schema or safe handler for, and showing it
+    // as available makes the model ask for a tool it cannot invoke.
+    final supported = kLlmRouterToolNames.intersection(server.toolNames);
+    final missing = kLlmRouterToolNames.difference(server.toolNames);
+    return {
+      'connected': true,
+      'device': alias,
+      'agent': server.name,
+      'agent_version': server.version,
+      'supported_tools': supported.toList()..sort(),
+      // Not what keeps the model from calling a missing tool — [toolsFor]
+      // does that by not offering it. This is the *explanation* for the
+      // absence, so the model can say "router này không đọc được lưu
+      // lượng" instead of being silently unable to.
+      if (missing.isNotEmpty) 'unavailable_tools': missing.toList()..sort(),
+    };
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Read tools — forwarded to the agent
@@ -201,6 +217,15 @@ ToolDefinition _networkGet(ToolHost host) => _readTool(
   choices: kNetworkInterfaces,
   defaultValue: kDefaultNetworkInterface,
   validate: (value) => validateUciSectionName(value, 'Tên interface'),
+);
+
+ToolDefinition _networkList(ToolHost host) => _readTool(
+  host,
+  name: 'network_list',
+  description:
+      'Liệt kê các interface mạng UCI của router. Dùng khi người dùng hỏi '
+      'router có những interface nào, hoặc cần chọn interface trước khi đọc '
+      'cấu hình chi tiết.',
 );
 
 ToolDefinition _wifiGet(ToolHost host) => _readTool(
@@ -244,6 +269,189 @@ ToolDefinition _trafficStats(ToolHost host) => _readTool(
   defaultValue: kDefaultTrafficInterface,
   validate: validateInterfaceName,
 );
+
+/// Creates a LAN change preview and owns the entire confirmation boundary.
+///
+/// `network_set_apply` intentionally has no [ToolDefinition]. The model never
+/// sees a plan token and can therefore never apply a network change itself.
+/// After the native confirmation dialog, the app owns apply, reconnect, and
+/// health confirmation end-to-end. DHCP remains preview-only because its new
+/// address cannot be known reliably enough to reconnect safely.
+ToolDefinition _networkSetPreview(
+  DeviceStore store,
+  ToolHost host,
+) => ToolDefinition(
+  name: 'network_set_preview',
+  description:
+      'Tạo bản xem trước để đổi cấu hình mạng LAN, chưa áp dụng. Chỉ gọi sau '
+      'khi đã đọc network_get. Chỉ hỗ trợ static hoặc dhcp. Với static cần '
+      'ipaddr và netmask; gateway có thể rỗng. Với dhcp, ipaddr, netmask và '
+      'gateway phải là chuỗi rỗng. Ứng dụng hiện hộp xác nhận trước khi áp '
+      'dụng IP tĩnh; DHCP chỉ hỗ trợ xem trước.',
+  parameters: [
+    ToolParam.enumType(
+      'interface',
+      values: const ['lan'],
+      description: 'Luôn là LAN.',
+      required: true,
+    ),
+    ToolParam.enumType(
+      'proto',
+      values: const ['static', 'dhcp'],
+      description: 'Kiểu kết nối mới.',
+      required: true,
+    ),
+    ToolParam.string('ipaddr', description: 'IP mới, hoặc rỗng với DHCP.'),
+    ToolParam.string(
+      'netmask',
+      description: 'Netmask mới, hoặc rỗng với DHCP.',
+    ),
+    ToolParam.string('gateway', description: 'Gateway mới, có thể rỗng.'),
+  ],
+  handler: (params) async {
+    final interface = params.getRequiredString('interface').trim();
+    final proto = params.getRequiredString('proto').trim();
+    final ipaddr = params.getString('ipaddr')?.trim() ?? '';
+    final netmask = params.getString('netmask')?.trim() ?? '';
+    final gateway = params.getString('gateway')?.trim() ?? '';
+
+    _validateLanChange(
+      interface: interface,
+      proto: proto,
+      ipaddr: ipaddr,
+      netmask: netmask,
+      gateway: gateway,
+    );
+
+    final client = host.requireClient();
+    try {
+      // This read is deliberately enforced in code, not merely requested in
+      // the prompt. The preview is always made against an observed baseline.
+      final current = await client.callTool('network_get', {
+        'interface': interface,
+      });
+      final preview = await client.callTool('network_set_preview', {
+        'interface': interface,
+        'proto': proto,
+        'ipaddr': ipaddr,
+        'netmask': netmask,
+        'gateway': gateway,
+      });
+      final planToken = preview['plan_token'];
+      if (planToken is! String || planToken.isEmpty) {
+        throw AgentProtocolException(
+          'Preview không trả về mã xác nhận hợp lệ.',
+        );
+      }
+
+      final approved = await host.confirm(
+        ConfirmRequest(
+          deviceAlias: host.deviceAlias,
+          summary: _lanChangeSummary(proto: proto, ipaddr: ipaddr),
+          pendingChanges: _formatNetworkPreview(preview),
+          warning:
+              'Đổi cấu hình LAN có thể làm điện thoại mất kết nối với router. '
+              'Nếu xảy ra, hãy kết nối lại bằng địa chỉ IP mới.',
+        ),
+      );
+      final safePreview = _safePreview(preview);
+      if (!approved) {
+        return {
+          'status': 'cancelled',
+          'message': 'Người dùng đã hủy, router không thay đổi.',
+          'current': current,
+          'preview': safePreview,
+        };
+      }
+
+      if (proto == 'dhcp') {
+        return {
+          'status': 'preview_confirmed_not_applied',
+          'message':
+              'Đổi LAN sang DHCP chưa thể áp dụng tự động vì ứng dụng không '
+              'biết địa chỉ mới để kết nối lại và xác nhận an toàn.',
+          'current': current,
+          'preview': safePreview,
+        };
+      }
+
+      final outcome = await host.applyApprovedStaticLanChange(
+        deviceStore: store,
+        planToken: planToken,
+        newHost: ipaddr,
+      );
+      return {
+        ...outcome.toModelJson(),
+        'current': current,
+        'preview': safePreview,
+      };
+    } on AgentErrorException catch (error) {
+      return explainAgentError(error, null);
+    }
+  },
+);
+
+void _validateLanChange({
+  required String interface,
+  required String proto,
+  required String ipaddr,
+  required String netmask,
+  required String gateway,
+}) {
+  if (interface != 'lan') {
+    throw UciValidationException('Chỉ hỗ trợ thay đổi cấu hình LAN.');
+  }
+  if (proto == 'dhcp') {
+    if (ipaddr.isNotEmpty || netmask.isNotEmpty || gateway.isNotEmpty) {
+      throw UciValidationException(
+        'Dùng DHCP thì không nhập IP, netmask hoặc gateway.',
+      );
+    }
+    return;
+  }
+  if (proto != 'static') {
+    throw UciValidationException(
+      'Kiểu kết nối chỉ có thể là static hoặc dhcp.',
+    );
+  }
+  if (ipaddr.isEmpty || netmask.isEmpty) {
+    throw UciValidationException('IP và netmask là bắt buộc khi dùng IP tĩnh.');
+  }
+  validateIpv4(ipaddr, 'IP LAN');
+  validateNetmask(netmask);
+  if (gateway.isNotEmpty) validateIpv4(gateway, 'Gateway');
+}
+
+String _lanChangeSummary({required String proto, required String ipaddr}) =>
+    proto == 'dhcp'
+    ? 'Chuyển mạng LAN sang tự động nhận địa chỉ IP.'
+    : 'Đổi địa chỉ IP LAN thành $ipaddr.';
+
+String _formatNetworkPreview(Map<String, dynamic> preview) {
+  final rawDiff = preview['diff'];
+  if (rawDiff is! Map) return 'Router đã tạo bản xem trước thay đổi LAN.';
+
+  const labels = {
+    'proto': 'Kiểu kết nối',
+    'ipaddr': 'Địa chỉ IP',
+    'netmask': 'Netmask',
+    'gateway': 'Gateway',
+  };
+  final lines = <String>[];
+  for (final entry in labels.entries) {
+    final change = rawDiff[entry.key];
+    if (change is! Map) continue;
+    final before = change['before']?.toString() ?? 'trống';
+    final after = change['after']?.toString() ?? 'trống';
+    if (before != after) lines.add('${entry.value}: $before → $after');
+  }
+  return lines.isEmpty ? 'Không có thay đổi cấu hình LAN.' : lines.join('\n');
+}
+
+Map<String, dynamic> _safePreview(Map<String, dynamic> preview) => {
+  if (preview['request'] is Map) 'request': preview['request'],
+  if (preview['diff'] is Map) 'diff': preview['diff'],
+};
 
 /// A tool that only reads. No staging, no confirmation, no result shape of its
 /// own — the agent's reply goes straight to the model.

@@ -5,6 +5,7 @@ import '../data/chat_database.dart';
 import '../data/chat_models.dart';
 import '../llm/chat_controller.dart';
 import '../llm/llm_service.dart';
+import '../net/device_profile.dart';
 import '../net/tool_host.dart';
 import 'confirm_dialog.dart';
 import 'message_bubble.dart';
@@ -16,6 +17,7 @@ class ChatScreen extends StatefulWidget {
     required this.llm,
     required this.tools,
     required this.toolHost,
+    required this.deviceStore,
     required this.conversation,
   });
 
@@ -23,6 +25,7 @@ class ChatScreen extends StatefulWidget {
   final LlmService llm;
   final List<ToolDefinition> tools;
   final ToolHost toolHost;
+  final DeviceStore deviceStore;
   final Conversation conversation;
 
   @override
@@ -42,6 +45,7 @@ class _ChatScreenState extends State<ChatScreen> {
       llm: widget.llm,
       tools: widget.tools,
       toolHost: widget.toolHost,
+      deviceStore: widget.deviceStore,
       conversationId: widget.conversation.id,
     )..addListener(_onControllerChanged);
     _controller.loadHistory();

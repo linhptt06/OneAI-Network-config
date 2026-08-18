@@ -95,11 +95,18 @@ class OpenWrtSession {
 
 /// Opens a session for [alias], resolving its stored password.
 Future<OpenWrtSession> connectByAlias(DeviceStore store, String alias) async {
-  final device = await store.findByAlias(alias);
+  final devices = await store.list();
+  final resolvedAlias = resolveDeviceAlias(
+    alias,
+    devices.map((device) => device.alias),
+  );
+  final device = resolvedAlias == null
+      ? null
+      : devices.where((device) => device.alias == resolvedAlias).single;
   if (device == null) {
     throw OpenWrtException(
-      'Không tìm thấy thiết bị có bí danh "$alias". '
-      'Hãy thêm thiết bị trong màn hình Cài đặt trước.',
+      'Không tìm thấy một thiết bị duy nhất khớp với bí danh "$alias". '
+      'Hãy dùng đúng bí danh đã lưu trong màn hình Cài đặt.',
     );
   }
   final password = await store.passwordFor(device.id);

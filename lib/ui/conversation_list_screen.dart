@@ -62,6 +62,7 @@ class _ConversationListScreenState extends State<ConversationListScreen> {
           llm: widget.llm,
           tools: widget.tools,
           toolHost: widget.toolHost,
+          deviceStore: widget.deviceStore,
           conversation: conversation,
         ),
       ),
@@ -85,8 +86,7 @@ class _ConversationListScreenState extends State<ConversationListScreen> {
             tooltip: 'Thiết bị OpenWrt',
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) =>
-                    DeviceSettingsScreen(store: widget.deviceStore),
+                builder: (_) => DeviceSettingsScreen(store: widget.deviceStore),
               ),
             ),
           ),

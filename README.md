@@ -28,9 +28,10 @@ Người dùng → UI chat
 
 - **Model là stateless.** `ChatSession` của llamadart chỉ giữ lịch sử trong RAM,
   nên SQLite là nguồn sự thật; mỗi lượt replay lại một cửa sổ tin nhắn gần nhất.
-- **Ghi cấu hình luôn hai pha.** `uci set` chỉ ghi vào vùng chờ; ứng dụng hiện
-  `uci changes` do router báo về để người dùng duyệt, rồi mới `uci commit` hoặc
-  `uci revert`. Bấm Hủy là thiết bị nguyên vẹn.
+- **Đổi IP LAN là giao dịch hai pha.** App đọc cấu hình hiện tại, yêu cầu agent
+  lập diff và hiện cảnh báo mất kết nối. Sau khi người dùng xác nhận, app áp
+  dụng thay đổi, kết nối lại tại IP mới và health-confirm trước deadline; lỗi
+  hoặc quá hạn để rollback guard trên router khôi phục cấu hình.
 - **Mật khẩu không đi qua model.** Model chỉ thấy bí danh thiết bị; mật khẩu SSH
   nằm trong keystore hệ thống (`flutter_secure_storage`), không vào SQLite.
 
@@ -81,22 +82,26 @@ WAN sẽ báo timeout.
 
 | Nhóm | Công cụ |
 |---|---|
-| Đọc | `list_devices`, `connect_device`, `get_wifi_info`, `get_network_info`, `get_vlan_info` |
-| Ghi *(cần xác nhận)* | `set_wifi`, `set_wan`, `set_vlan` |
+| Cục bộ | `list_devices`, `connect_device` |
+| Đọc router | `network_get`, `network_list`, `wifi_get`, `route_info`, `traffic_stats` |
+| Preview LAN | `network_set_preview` |
 
-Không có công cụ nào nhận lệnh thô dạng chuỗi. Mọi giá trị ghi xuống thiết bị đi
-qua `shellQuote`, và tham số dạng liệt kê được ràng buộc bằng GBNF grammar nên
-model không sinh được giá trị ngoài danh sách.
+`network_set_apply` và `network_set_health_confirm` là API nội bộ: không nằm
+trong system prompt hoặc catalogue LLM, và LLM không nhận token của chúng.
+`network_apply_enabled` là cờ thuộc app, không do LLM điều khiển. Khi bật, app
+giữ token ngoài lịch sử chat, kết nối SSH lại tại IP mới, gọi tool đọc để kiểm
+tra agent còn hoạt động, rồi health-confirm bằng token riêng trước deadline.
+Nếu lỗi hoặc quá hạn, rollback guard trên router tự phục hồi cấu hình; app giữ
+nguyên IP đã lưu.
 
-`set_vlan` tự phát hiện cơ chế VLAN (DSA hay swconfig) và **từ chối chạy** khi
-không xác định được, thay vì đoán — đoán sai ở đây là mất kết nối tới router.
+Không có tool nào cho model chạy shell command. Schema, mô tả tool và router
+state đều do app tạo; agent chỉ cung cấp tên capability để app lọc catalogue.
 
 ## Agent trên router (đang phát triển)
 
-`lib/net/agent_*.dart` hiện thực phía client của một giao thức JSON qua
-stdin/stdout, để sau này logic dựng lệnh chuyển sang một agent chạy trên chính
-router. Agent chưa được viết; đường thực thi hiện tại vẫn là dựng lệnh UCI trong
-Dart.
+`lib/net/mcp_*.dart` hiện thực MCP JSON-RPC qua SSH tới agent C chạy trên
+router. App không tin mô tả/schema từ agent; chỉ dùng danh sách tên tool agent
+khai báo để lọc catalogue do app sở hữu.
 
 Điểm cốt lõi của giao thức: thiết bị chỉ được khai **tên** công cụ nó hỗ trợ.
 Mọi mô tả mà model đọc đều do ứng dụng sở hữu, nên một router bị chiếm quyền
@@ -109,5 +114,6 @@ flutter analyze
 flutter test
 ```
 
-Toàn bộ test chạy không cần router: parser UCI, kiểm tra hợp lệ IP/netmask/SSID,
-che bí mật, và giao thức agent đều là hàm thuần hoặc dùng transport giả.
+Toàn bộ test chạy không cần router: kiểm tra hợp lệ IP/netmask, catalogue LLM,
+router state không chứa secret, và giao thức MCP đều là hàm thuần hoặc dùng
+transport giả.

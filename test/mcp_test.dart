@@ -48,7 +48,13 @@ Map<String, dynamic> initResult(int id) => {
 /// A transport that answers `initialize` and `tools/list` normally and defers
 /// every `tools/call` to [onCall].
 FakeMcpTransport transportWith({
-  List<String> tools = const ['network_get', 'wifi_get', 'route_info'],
+  List<String> tools = const [
+    'traffic_stats',
+    'network_get',
+    'network_list',
+    'route_info',
+    'wifi_get',
+  ],
   Map<String, dynamic> Function(Map<String, dynamic> request)? onCall,
 }) {
   return FakeMcpTransport((request) {
@@ -65,7 +71,13 @@ FakeMcpTransport transportWith({
 }
 
 Future<McpClient> connected({
-  List<String> tools = const ['network_get', 'wifi_get', 'route_info'],
+  List<String> tools = const [
+    'traffic_stats',
+    'network_get',
+    'network_list',
+    'route_info',
+    'wifi_get',
+  ],
   Map<String, dynamic> Function(Map<String, dynamic> request)? onCall,
 }) async {
   final client = McpClient(transportWith(tools: tools, onCall: onCall));
@@ -94,7 +106,13 @@ void main() {
     test('keeps names and throws the device descriptions away', () async {
       final server = (await connected()).server!;
 
-      expect(server.toolNames, {'network_get', 'wifi_get', 'route_info'});
+      expect(server.toolNames, {
+        'traffic_stats',
+        'network_get',
+        'network_list',
+        'route_info',
+        'wifi_get',
+      });
       // McpServerInfo has nowhere to put a device-supplied description, which
       // is the point: nothing the router writes can reach the model's prompt.
     });
@@ -189,6 +207,21 @@ void main() {
       final params = transport.requests.last['params'] as Map<String, dynamic>;
       expect(params['name'], 'wifi_get');
       expect(params['arguments'], {'section': 'ra0'});
+    });
+
+    test('calls network_list without inventing arguments', () async {
+      final transport = transportWith(
+        onCall: (request) =>
+            textResult(request['id'] as int, {'status': 'ok', 'data': {}}),
+      );
+      final client = McpClient(transport);
+      await client.connect();
+
+      await client.callTool('network_list');
+
+      final params = transport.requests.last['params'] as Map<String, dynamic>;
+      expect(params['name'], 'network_list');
+      expect(params['arguments'], isEmpty);
     });
   });
 

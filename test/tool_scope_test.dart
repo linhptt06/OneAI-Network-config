@@ -1,5 +1,6 @@
 import 'package:chatbot/llm/chat_controller.dart';
 import 'package:chatbot/llm/net_tools.dart';
+import 'package:chatbot/llm/router_state.dart';
 import 'package:chatbot/net/tool_host.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -61,10 +62,35 @@ void main() {
       expect(namesOf(offered), {'list_devices', 'connect_device', 'wifi_get'});
     });
 
+    test('never offers apply or health confirmation to the LLM', () {
+      final offered = toolsFor(realCatalogue(), const {
+        'traffic_stats',
+        'network_get',
+        'network_list',
+        'route_info',
+        'wifi_get',
+        'network_set_preview',
+        'network_set_apply',
+        'network_set_health_confirm',
+      });
+
+      expect(namesOf(offered), {
+        'list_devices',
+        'connect_device',
+        'traffic_stats',
+        'network_get',
+        'network_list',
+        'route_info',
+        'wifi_get',
+        'network_set_preview',
+      });
+    });
+
     test('offers every read tool a fully capable device declares', () {
       final offered = toolsFor(realCatalogue(), kReadToolNames);
 
       expect(namesOf(offered), namesOf(realCatalogue()));
+      expect(namesOf(offered), contains('network_list'));
     });
   });
 
@@ -80,7 +106,9 @@ void main() {
       // tool without editing it here would leave the model with instructions to
       // call something that no longer answers.
       expect(
-        toolNamesMentionedIn(kSystemPrompt).difference(namesOf(realCatalogue())),
+        toolNamesMentionedIn(
+          kSystemPrompt,
+        ).difference(namesOf(realCatalogue())),
         isEmpty,
       );
     });
@@ -110,11 +138,63 @@ void main() {
         'get_wifi_info',
       });
       expect(
-        toolNamesMentionedIn('gọi lại get_wifi_info').difference(
-          namesOf(realCatalogue()),
-        ),
+        toolNamesMentionedIn(
+          'gọi lại get_wifi_info',
+        ).difference(namesOf(realCatalogue())),
         {'get_wifi_info'},
       );
+    });
+  });
+
+  group('LAN change safety boundary', () {
+    test('offers a preview but never exposes the internal apply operation', () {
+      final tools = realCatalogue();
+      final preview = tools.singleWhere(
+        (tool) => tool.name == 'network_set_preview',
+      );
+
+      expect(preview.parameters.map((parameter) => parameter.name), [
+        'interface',
+        'proto',
+        'ipaddr',
+        'netmask',
+        'gateway',
+      ]);
+      expect(namesOf(tools), isNot(contains('network_set_apply')));
+      expect(kSystemPrompt, contains('network_set_preview'));
+      expect(kSystemPrompt, isNot(contains('network_set_apply')));
+    });
+  });
+
+  test('router state contains aliases and LLM-safe capabilities only', () {
+    final state = routerStateFor(
+      aliases: const ['oneai'],
+      connectedDeviceAlias: 'oneai',
+      deviceToolNames: const {
+        'traffic_stats',
+        'network_get',
+        'network_list',
+        'route_info',
+        'wifi_get',
+        'network_set_preview',
+        'network_set_apply',
+        'network_set_health_confirm',
+      },
+      networkApplyEnabled: false,
+    );
+
+    expect(state, {
+      'saved_device_aliases': ['oneai'],
+      'connected_device_alias': 'oneai',
+      'available_router_tools': [
+        'network_get',
+        'network_list',
+        'network_set_preview',
+        'route_info',
+        'traffic_stats',
+        'wifi_get',
+      ],
+      'network_apply_enabled': false,
     });
   });
 

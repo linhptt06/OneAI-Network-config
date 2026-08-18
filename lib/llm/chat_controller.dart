@@ -5,34 +5,42 @@ import 'package:llamadart/llamadart.dart';
 
 import '../data/chat_database.dart';
 import '../data/chat_models.dart';
+import '../net/device_profile.dart';
 import '../net/tool_host.dart';
 import 'llm_service.dart';
 import 'net_tools.dart';
+import 'router_state.dart';
 
 /// The "act, do not announce" rule exists because a 1.5B model tends to reply
 /// "Đang kiểm tra..." and stop, instead of emitting the call. Stating the
 /// failure mode as a forbidden behaviour is what suppresses it.
 const String kSystemPrompt =
-    'Bạn là trợ lý quản trị mạng OpenWrt, trả lời bằng tiếng Việt, ngắn gọn.\n'
-    'QUY TẮC BẮT BUỘC:\n'
-    '1. Khi cần thông tin từ router, PHẢI gọi công cụ NGAY trong lượt này. '
-    'TUYỆT ĐỐI KHÔNG trả lời "đang kiểm tra", "để tôi xem", "chờ chút" — '
-    'những câu đó là sai, phải gọi công cụ thay vì hứa hẹn.\n'
-    '1b. TUYỆT ĐỐI KHÔNG in ra JSON, khối mã, hay hướng dẫn người dùng tự gọi '
-    'công cụ. Người dùng không gọi được công cụ, chỉ bạn gọi được. Cũng KHÔNG '
-    'được nói "tôi không truy cập được router" — bạn có công cụ, hãy dùng.\n'
-    '2. Hỏi về tên WiFi, SSID, mã hoá, kênh → gọi wifi_get.\n'
-    '3. Hỏi về WAN, LAN, địa chỉ IP của router → gọi network_get.\n'
-    '4. Hỏi router đang ra Internet đường nào → gọi route_info. '
-    'Hỏi về lưu lượng đã dùng → gọi traffic_stats.\n'
-    '5. Phải gọi connect_device trước các công cụ khác.\n'
-    '6. Chỉ trả lời dựa trên kết quả công cụ trả về. Không bịa tên interface, '
-    'SSID hay giá trị cấu hình.\n'
-    '7. Không biết tên interface hay section thì BỎ TRỐNG tham số để dùng mặc '
-    'định. Công cụ trả về "error" thì đọc "hint", thử lại nhiều nhất một lần '
-    'rồi báo người dùng.\n'
-    '8. KHÔNG đọc được mật khẩu WiFi — router không cho phép. Được hỏi thì nói '
-    'thẳng là không xem được, TUYỆT ĐỐI KHÔNG đoán một mật khẩu nào.';
+    'Bạn là trợ lý quản trị router OpenWrt. Trả lời tiếng Việt tự nhiên, '
+    'ngắn gọn, đúng trọng tâm. Người dùng không cần biết tên công cụ, JSON '
+    'hay bí danh kỹ thuật.\n'
+    'NGUYÊN TẮC:\n'
+    '1. Chỉ khẳng định dữ liệu lấy từ kết quả công cụ. Không đoán cấu hình, '
+    'IP, SSID, interface hoặc trạng thái router.\n'
+    '2. Khi chưa kết nối router, gọi list_devices để lấy alias, sau đó gọi '
+    'connect_device với đúng alias. “Kết nối tới router oneai” và “kết nối '
+    'tới oneai” cùng nghĩa: alias là oneai; “router” không phải alias.\n'
+    '3. Khi cần thông tin từ router, gọi công cụ ngay trong lượt này. Không '
+    'nói “đang kiểm tra”, “để tôi xem” hoặc hướng dẫn người dùng tự gọi công cụ.\n'
+    '4. Hỏi router có những interface nào hoặc cần chọn interface trước khi '
+    'đọc/sửa thì gọi network_list. Hỏi LAN, WAN, IP hay cấu hình mạng thì '
+    'gọi network_get. Hỏi Wi-Fi thì gọi wifi_get; không đọc hoặc đoán mật khẩu. '
+    'Hỏi đường ra Internet thì gọi route_info. Hỏi lưu lượng thì gọi '
+    'traffic_stats.\n'
+    '5. Nếu thiếu thông tin bắt buộc để đổi cấu hình, chỉ hỏi một câu ngắn, rõ ràng.\n'
+    'ĐỔI IP LAN AN TOÀN:\n'
+    '6. Khi người dùng muốn đổi IP LAN hoặc kiểu kết nối mạng, luôn đọc '
+    'network_get trước. Chỉ dùng network_set_preview để tạo bản xem trước, '
+    'chưa áp dụng cấu hình. Chỉ hỗ trợ proto static hoặc dhcp. Với static, '
+    'cần IP và netmask hợp lệ; gateway có thể để trống. Với dhcp, không gửi '
+    'IP, netmask hoặc gateway.\n'
+    '7. Sau preview, ứng dụng sẽ hiển thị thay đổi và cảnh báo có thể mất kết '
+    'nối. Không tự khẳng định đã đổi cấu hình khi người dùng chưa xác nhận. '
+    'Khi người dùng hủy, không có thay đổi nào được áp dụng.';
 
 /// Longest tool result replayed back into a prompt.
 ///
@@ -67,6 +75,7 @@ class ChatController extends ChangeNotifier {
     required this.llm,
     required this.tools,
     required this.toolHost,
+    required this.deviceStore,
     required this.conversationId,
   });
 
@@ -80,6 +89,7 @@ class ChatController extends ChangeNotifier {
   /// Read here for one reason: the connected device decides which read tools
   /// belong in the prompt.
   final ToolHost toolHost;
+  final DeviceStore deviceStore;
 
   final int conversationId;
 
@@ -112,7 +122,8 @@ class ChatController extends ChangeNotifier {
     // Each refusal reports why. Returning silently here once cost a debugging
     // session: a stuck engine lock looked exactly like the app ignoring taps.
     if (_isGenerating || llm.turnInProgress) {
-      _turnError = 'Model đang bận trả lời câu trước. Đợi một chút rồi thử lại.';
+      _turnError =
+          'Model đang bận trả lời câu trước. Đợi một chút rồi thử lại.';
       notifyListeners();
       return;
     }
@@ -153,10 +164,16 @@ class ChatController extends ChangeNotifier {
       // The engine is stateless between turns: rebuild the prompt from the
       // persisted history every time.
       final window = await database.recentMessages(conversationId);
+      final routerState = await buildRouterState(
+        deviceStore: deviceStore,
+        toolHost: toolHost,
+      );
       final replayed = <LlamaChatMessage>[
         LlamaChatMessage.fromText(
           role: LlamaChatRole.system,
-          text: kSystemPrompt,
+          text:
+              '$kSystemPrompt\n\nTRẠNG THÁI ROUTER (do ứng dụng tạo):\n'
+              '${jsonEncode(routerState)}',
         ),
         ...window.map(_replayable),
       ];

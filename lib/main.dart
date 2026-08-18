@@ -35,7 +35,10 @@ class _ChatbotAppState extends State<ChatbotApp> {
 
   /// Holds the live SSH session and the confirmation callback. Built once
   /// here so the session survives navigation between screens.
-  final _toolHost = ToolHost();
+  // The router agent supports an expiring rollback guard and health-confirm.
+  // The LLM still cannot enable this: it is only reached after the native UI
+  // confirmation in the preview handler.
+  final _toolHost = ToolHost(networkApplyEnabled: true);
 
   /// The full tool catalogue — every tool this build can execute.
   ///
