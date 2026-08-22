@@ -1,6 +1,5 @@
 import 'package:llamadart/llamadart.dart';
 
-import '../net/agent_client.dart';
 import '../net/agent_protocol.dart';
 import '../net/device_profile.dart';
 import '../net/mcp_client.dart';
@@ -8,6 +7,7 @@ import '../net/mcp_transport.dart';
 import '../net/openwrt_session.dart';
 import '../net/tool_host.dart';
 import '../net/validation.dart';
+import 'tool_catalogue.dart';
 
 /// Tools that let the model read OpenWrt configuration.
 ///

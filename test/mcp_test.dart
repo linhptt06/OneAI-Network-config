@@ -131,6 +131,25 @@ void main() {
       expect(data, {'interface': 'lan', 'proto': 'static'});
     });
 
+    test('preserves an array payload from network_list', () async {
+      final client = await connected(
+        onCall: (request) => textResult(request['id'] as int, {
+          'status': 'ok',
+          'data': [
+            {'interface': 'lan'},
+            {'interface': 'wan'},
+          ],
+        }),
+      );
+
+      final result = await client.callTool('network_list');
+
+      expect(result['items'], [
+        {'interface': 'lan'},
+        {'interface': 'wan'},
+      ]);
+    });
+
     test('a tool failure is an error even though isError says false', () async {
       // The router builds failures with the same helper as successes, so the
       // MCP-level flag is useless. Only `status` inside the text is truthful,
@@ -243,10 +262,10 @@ void main() {
 
     test('a reply carrying the wrong id is refused', () async {
       final client = await connected(
-        onCall: (request) => textResult(
-          (request['id'] as int) + 99,
-          {'status': 'ok', 'data': {}},
-        ),
+        onCall: (request) => textResult((request['id'] as int) + 99, {
+          'status': 'ok',
+          'data': {},
+        }),
       );
 
       await expectLater(

@@ -1,12 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../data/chat_models.dart';
 
-/// Renders user-facing chat messages.
-///
-/// Tool calls are retained in SQLite to reconstruct the next model turn, but
-/// they are application internals. Showing their JSON or names would make the
-/// user decipher implementation details instead of the assistant's answer.
+/// Renders user-facing chat messages and a compact audit trail for tool use.
 class MessageBubble extends StatelessWidget {
   const MessageBubble({super.key, required this.message});
 
@@ -28,9 +26,28 @@ class MessageBubble extends StatelessWidget {
         textColor: Theme.of(context).colorScheme.onSurface,
         reasoning: message.reasoning,
       ),
-      StoredMessageKind.toolCall ||
-      StoredMessageKind.toolResult => const SizedBox.shrink(),
+      StoredMessageKind.toolCall => _ToolTile(
+        icon: Icons.build_outlined,
+        title: 'Gọi công cụ: ${message.toolName}',
+        // Arguments can contain implementation details, so only expose a
+        // short status here. The returned value remains available below.
+        body: 'Đã gửi yêu cầu tới công cụ.',
+      ),
+      StoredMessageKind.toolResult => _ToolTile(
+        icon: Icons.check_circle_outline,
+        title: 'Kết quả: ${message.toolName}',
+        body: _prettyJson(message.content),
+      ),
     };
+  }
+}
+
+String _prettyJson(String? raw) {
+  if (raw == null || raw.isEmpty) return '{}';
+  try {
+    return const JsonEncoder.withIndent('  ').convert(jsonDecode(raw));
+  } catch (_) {
+    return raw;
   }
 }
 
@@ -88,6 +105,50 @@ class _Bubble extends StatelessWidget {
                 ),
               ),
             SelectableText(text, style: TextStyle(color: textColor)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ToolTile extends StatelessWidget {
+  const _ToolTile({
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
+
+  final IconData icon;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+      decoration: BoxDecoration(
+        border: Border.all(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          dense: true,
+          leading: Icon(icon, size: 18, color: scheme.primary),
+          title: Text(title, style: Theme.of(context).textTheme.labelMedium),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SelectableText(
+                body,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+              ),
+            ),
           ],
         ),
       ),
