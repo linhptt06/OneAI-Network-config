@@ -18,8 +18,7 @@ class McpServerInfo {
   /// purpose. Descriptions are rendered into the model's prompt, so accepting
   /// them from the device would let a compromised router write into the model's
   /// context. The app owns every word the model reads; the device only gets to
-  /// say which of the app's tools it supports. Same rule as [negotiateTools] in
-  /// `agent_client.dart`.
+  /// say which of the app's tools it supports.
   final Set<String> toolNames;
 
   final String? name;
@@ -33,9 +32,8 @@ class McpServerInfo {
 /// The distinction matters for what the model does next: a bad section name is
 /// worth retrying with a different name, a dead ubus is not.
 ///
-/// Third group, [kUnsupportedToolCode], sits in `agent_protocol.dart` because
-/// both wire protocols raise it. Anything reading these sets must handle all
-/// three, or a code falls through to "wrong parameter" advice it has no use for.
+/// [kUnsupportedToolCode] is handled separately because changing arguments
+/// cannot make a tool that the router does not advertise become available.
 const Set<String> kRouterFaultCodes = {
   'backend_unavailable',
   'backend_failed',
@@ -90,9 +88,7 @@ class McpClient {
 
     final rawTools = listResult['tools'];
     if (rawTools is! List) {
-      throw AgentProtocolException(
-        'Phản hồi tools/list thiếu trường "tools".',
-      );
+      throw AgentProtocolException('Phản hồi tools/list thiếu trường "tools".');
     }
 
     final serverInfo = initResult['serverInfo'];
@@ -145,13 +141,15 @@ class McpClient {
     return _unwrapToolResult(result);
   }
 
-  Map<String, dynamic> _request(String method, {Map<String, dynamic>? params}) =>
-      {
-        'jsonrpc': '2.0',
-        'id': _nextId++,
-        'method': method,
-        'params': ?params,
-      };
+  Map<String, dynamic> _request(
+    String method, {
+    Map<String, dynamic>? params,
+  }) => {
+    'jsonrpc': '2.0',
+    'id': _nextId++,
+    'method': method,
+    'params': ?params,
+  };
 
   /// Peels the JSON-RPC envelope, checking that the reply belongs to the
   /// request that asked for it.
@@ -222,7 +220,8 @@ class McpClient {
             ? error['code']?.toString() ?? 'unknown'
             : 'unknown',
         error is Map<String, dynamic>
-            ? error['message']?.toString() ?? 'Tool báo lỗi không rõ nguyên nhân.'
+            ? error['message']?.toString() ??
+                  'Tool báo lỗi không rõ nguyên nhân.'
             : 'Tool báo lỗi không rõ nguyên nhân.',
       );
     }
@@ -231,6 +230,13 @@ class McpClient {
     }
 
     final data = envelope['data'];
-    return data is Map<String, dynamic> ? data : const {};
+    if (data is Map<String, dynamic>) return data;
+    // Most tools return an object, but network_list is deliberately an array.
+    // Do not collapse that array to {}: doing so made a real router with LAN
+    // and WAN look like it had no configured interfaces.
+    if (data is List) return {'items': data};
+    throw AgentProtocolException(
+      'Tool trả về data không hợp lệ: mong đợi object hoặc mảng JSON.',
+    );
   }
 }

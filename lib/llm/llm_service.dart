@@ -110,10 +110,7 @@ class LlmService extends ChangeNotifier {
 
       await engine.loadModelSource(
         ModelSource.parse(_modelSource),
-        modelParams: const ModelParams(
-          contextSize: 8192,
-          gpuLayers: 0,
-        ),
+        modelParams: const ModelParams(contextSize: 8192, gpuLayers: 0),
         options: ModelLoadOptions(cacheDirectory: cacheDir),
         onProgress: (progress) {
           _downloadProgress = progress.fraction;
@@ -202,7 +199,16 @@ class ToolCallCompleted extends TurnEvent {
 class AssistantMessageCompleted extends TurnEvent {
   final String text;
   final String? reasoning;
-  const AssistantMessageCompleted(this.text, this.reasoning);
+
+  /// False only for prose emitted alongside a tool call. Callers need this to
+  /// avoid presenting a model preamble as a completed, grounded answer.
+  final bool isFinal;
+
+  const AssistantMessageCompleted(
+    this.text,
+    this.reasoning, {
+    this.isFinal = true,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -259,18 +265,54 @@ const GenerationParams kTurnParams = GenerationParams(
   penalty: 1.0,
 );
 
-
 const int kMaxToolResultChars = 1500;
 String truncateToolResult(String result) => result.length <= kMaxToolResultChars
     ? result
     : '${result.substring(0, kMaxToolResultChars)}'
-        '… [đã cắt bớt — gọi lại công cụ nếu cần đầy đủ]';
+          '… [đã cắt bớt — gọi lại công cụ nếu cần đầy đủ]';
+
+/// The tool set and choice for one model round.
+///
+/// A required call is limited to one definition. ToolChoice.required then
+/// becomes a grammar-level constraint rather than a hope expressed in prose.
+class ToolRoundPlan {
+  const ToolRoundPlan({required this.tools, required this.toolChoice});
+
+  final List<ToolDefinition>? tools;
+  final ToolChoice toolChoice;
+}
+
+/// Narrows one round to [requiredToolName] until that tool has been called.
+///
+/// The policy remains inert when the connected router does not advertise the
+/// tool. In that case the caller can return a truthful not-supported result
+/// instead of inventing success.
+ToolRoundPlan planToolRound({
+  required List<ToolDefinition>? offered,
+  required String? requiredToolName,
+  required bool requiredToolHasBeenCalled,
+}) {
+  if (offered == null) {
+    return const ToolRoundPlan(tools: null, toolChoice: ToolChoice.none);
+  }
+
+  if (requiredToolName != null && !requiredToolHasBeenCalled) {
+    final required = offered
+        .where((tool) => tool.name == requiredToolName)
+        .toList(growable: false);
+    if (required.isNotEmpty) {
+      return ToolRoundPlan(tools: required, toolChoice: ToolChoice.required);
+    }
+  }
+  return ToolRoundPlan(tools: offered, toolChoice: ToolChoice.auto);
+}
 
 Stream<TurnEvent> runChatTurn({
   required LlmService llm,
   required List<LlamaChatMessage> messages,
   required List<ToolDefinition> tools,
   List<ToolDefinition> Function()? provideTools,
+  String? requiredToolName,
   GenerationParams params = kTurnParams,
   int maxToolRounds = 4,
 }) async* {
@@ -289,6 +331,7 @@ Stream<TurnEvent> runChatTurn({
       messages: messages,
       tools: tools,
       provideTools: provideTools ?? () => tools,
+      requiredToolName: requiredToolName,
       params: params,
       maxToolRounds: maxToolRounds,
     );
@@ -304,9 +347,11 @@ Stream<TurnEvent> _runChatTurnLocked({
   required List<LlamaChatMessage> messages,
   required List<ToolDefinition> tools,
   required List<ToolDefinition> Function() provideTools,
+  required String? requiredToolName,
   required GenerationParams params,
   required int maxToolRounds,
 }) async* {
+  var requiredToolHasBeenCalled = false;
   for (var round = 0; round <= maxToolRounds; round++) {
     final text = StringBuffer();
     final thinking = StringBuffer();
@@ -320,12 +365,17 @@ Stream<TurnEvent> _runChatTurnLocked({
     // can change what is available for the next round — connecting to a device
     // is exactly that.
     final offered = offerTools ? provideTools() : null;
+    final roundPlan = planToolRound(
+      offered: offered,
+      requiredToolName: requiredToolName,
+      requiredToolHasBeenCalled: requiredToolHasBeenCalled,
+    );
 
     await for (final chunk in engine.create(
       messages,
       params: params,
-      tools: offered,
-      toolChoice: offered == null ? ToolChoice.none : ToolChoice.auto,
+      tools: roundPlan.tools,
+      toolChoice: roundPlan.toolChoice,
     )) {
       if (chunk.choices.isEmpty) continue;
       final delta = chunk.choices.first.delta;
@@ -352,7 +402,11 @@ Stream<TurnEvent> _runChatTurnLocked({
 
     // No tool requested — the turn is over.
     if (builders.isEmpty) {
-      yield AssistantMessageCompleted(text.toString(), reasoning);
+      yield AssistantMessageCompleted(
+        text.toString(),
+        reasoning,
+        isFinal: true,
+      );
       messages.add(
         LlamaChatMessage.fromText(
           role: LlamaChatRole.assistant,
@@ -364,7 +418,11 @@ Stream<TurnEvent> _runChatTurnLocked({
 
     // Any prose that came alongside the tool call is still worth showing.
     if (text.isNotEmpty) {
-      yield AssistantMessageCompleted(text.toString(), reasoning);
+      yield AssistantMessageCompleted(
+        text.toString(),
+        reasoning,
+        isFinal: false,
+      );
     }
 
     for (final index in builders.keys.toList()..sort()) {
@@ -372,6 +430,7 @@ Stream<TurnEvent> _runChatTurnLocked({
       final name = builder.name ?? '';
       final id = builder.id ?? 'call_$index';
       final arguments = builder.decodedArguments;
+      if (name == requiredToolName) requiredToolHasBeenCalled = true;
 
       yield ToolCallRequested(id: id, name: name, arguments: arguments);
 

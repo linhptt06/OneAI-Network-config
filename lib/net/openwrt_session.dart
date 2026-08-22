@@ -44,7 +44,7 @@ class OpenWrtSession {
 
   bool get isClosed => _client.isClosed;
 
-  /// The SSH client, which [SshAgentTransport] rides on.
+  /// The SSH client, which [SshMcpTransport] rides on.
   SSHClient get client => _client;
 
   static Future<OpenWrtSession> connect(
