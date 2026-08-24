@@ -30,6 +30,8 @@ Future<NetworkApplyOutcome> runApprovedNetworkApply({
   required bool approved,
   required String proto,
   required String planToken,
+  required String previewHealthToken,
+  required int previewDeadlineSeconds,
   required ApplyNetworkPlan apply,
   required ReconnectAndConfirmHealth reconnectAndConfirmHealth,
 }) async {
@@ -54,19 +56,14 @@ Future<NetworkApplyOutcome> runApprovedNetworkApply({
     );
   }
 
-  final applied = await apply({'plan_token': planToken, 'confirmed': true});
-  final healthToken = applied['health_token'];
-  final deadline = applied['deadline'];
-  if (healthToken is! String || healthToken.length != 64 || deadline is! num) {
-    return const NetworkApplyOutcome(
-      status: 'invalid_apply_response',
-      message: 'Agent không trả về dữ liệu xác nhận sức khỏe hợp lệ.',
-    );
-  }
+  // Apply can drop the old SSH connection before a response comes back. The
+  // preview already bound these values to the plan, so keep reconnecting with
+  // them instead of trusting an apply response that may never arrive.
+  await apply({'plan_token': planToken, 'confirmed': true});
 
   final healthy = await reconnectAndConfirmHealth(
-    healthToken: healthToken,
-    deadlineSeconds: deadline.toInt(),
+    healthToken: previewHealthToken,
+    deadlineSeconds: previewDeadlineSeconds,
   );
   return healthy
       ? const NetworkApplyOutcome(

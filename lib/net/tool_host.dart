@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:dartssh2/dartssh2.dart';
+
+import 'agent_protocol.dart';
 import 'device_profile.dart';
 import 'mcp_client.dart';
 import 'mcp_transport.dart';
@@ -115,6 +118,8 @@ class ToolHost {
   Future<NetworkApplyOutcome> applyApprovedStaticLanChange({
     required DeviceStore deviceStore,
     required String planToken,
+    required String healthToken,
+    required int deadlineSeconds,
     required String newHost,
   }) async {
     if (!networkApplyEnabled) {
@@ -155,8 +160,23 @@ class ToolHost {
         approved: true,
         proto: 'static',
         planToken: planToken,
-        apply: (arguments) =>
-            oldClient.callTool('network_set_apply', arguments),
+        previewHealthToken: healthToken,
+        previewDeadlineSeconds: deadlineSeconds,
+        apply: (arguments) async {
+          try {
+            return await oldClient.callTool('network_set_apply', arguments);
+          } on AgentProtocolException {
+            // Losing this reply is expected if applying the new LAN address
+            // tears down the old SSH connection. Reconnect still uses the
+            // preview-bound health token and deadline above.
+            return const <String, dynamic>{};
+          } on SSHSocketError {
+            // dartssh2 reports a connection reset as a raw socket error.
+            // At this point it means the old LAN address was replaced, so
+            // proceed with reconnecting to the new address.
+            return const <String, dynamic>{};
+          }
+        },
         reconnectAndConfirmHealth:
             ({required healthToken, required deadlineSeconds}) =>
                 _reconnectAndConfirmHealth(

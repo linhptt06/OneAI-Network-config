@@ -130,6 +130,44 @@ IP WAN sẽ báo timeout.
 
 ---
 
+## Cài Router Agent từ build server sang router
+
+Trên build server có OpenWrt SDK và checkout đầy đủ
+`router-agent-build-server` (chỉ `src/` không build được):
+
+```sh
+cd /duong-dan/toi/router-agent-build-server
+make
+make test
+```
+
+Copy ba binary sang router OpenWrt tương thích (bản này nhắm AArch64/musl):
+
+```sh
+ROUTER_DEST='root@192.168.1.1'
+ssh "$ROUTER_DEST" 'mkdir -p /usr/libexec/router-agent'
+scp -O -p build/mcp_stdio_server build/runtime_probe build/rollback_guard \
+  "$ROUTER_DEST:/usr/libexec/router-agent/"
+scp -O -p files/init.d/router-agent-rollback-guard \
+  "$ROUTER_DEST:/tmp/router-agent-rollback-guard"
+```
+
+```sh
+ssh "$ROUTER_DEST" '
+  chmod 755 /usr/libexec/router-agent/*
+  install -m 0755 /tmp/router-agent-rollback-guard \
+    /etc/init.d/router-agent-rollback-guard
+  /etc/init.d/router-agent-rollback-guard enable
+  /etc/init.d/router-agent-rollback-guard restart
+  ps | grep "[r]ollback_guard"
+'
+```
+
+Không dừng `rollback_guard` khi đang đổi IP LAN. Dùng IP LAN của router và giữ
+đường quản trị dự phòng khi thử thay đổi mạng.
+
+---
+
 ## Prompt để test từng tool call
 
 App có 8 tool. Bảng dưới là câu prompt để ép model gọi đúng từng tool — đọc từ

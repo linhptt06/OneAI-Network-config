@@ -209,7 +209,7 @@ ToolDefinition _networkList(ToolHost host) => _readTool(
   host,
   name: 'network_list',
   description:
-      'Liệt kê các interface mạng UCI của router. Dùng khi người dùng hỏi '
+      'Liệt kê các interface mạng của router. Dùng khi người dùng hỏi '
       'router có những interface nào, hoặc cần chọn interface trước khi đọc '
       'cấu hình chi tiết.',
 );
@@ -322,7 +322,13 @@ ToolDefinition _networkSetPreview(
         'gateway': gateway,
       });
       final planToken = preview['plan_token'];
-      if (planToken is! String || planToken.isEmpty) {
+      final healthToken = preview['health_token'];
+      final deadline = preview['deadline'];
+      if (planToken is! String ||
+          planToken.isEmpty ||
+          healthToken is! String ||
+          healthToken.length != 64 ||
+          deadline is! num) {
         throw AgentProtocolException(
           'Preview không trả về mã xác nhận hợp lệ.',
         );
@@ -362,6 +368,8 @@ ToolDefinition _networkSetPreview(
       final outcome = await host.applyApprovedStaticLanChange(
         deviceStore: store,
         planToken: planToken,
+        healthToken: healthToken,
+        deadlineSeconds: deadline.toInt(),
         newHost: ipaddr,
       );
       return {
