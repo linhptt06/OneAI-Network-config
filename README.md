@@ -76,6 +76,70 @@ flutter devices                          # phải thấy emulator-5554
 > lỗi build lạ.
 
 ---
+## Cài Router Agent từ build server sang router
+
+Ứng dụng cần `mcp_stdio_server` chạy trên router để đọc cấu hình và thực hiện
+luồng đổi IP LAN an toàn. Việc này chỉ áp dụng cho **OpenWrt tương thích với
+binary đã build**. Bản build hiện tại nhắm `aarch64_cortex-a53` dùng musl; không
+copy binary này sang router MIPS, ARM 32-bit, x86_64 hoặc firmware không tương
+thích.
+
+### 1. Build trên build server
+Đăng nhập vào server build: ssh inter01@10.2.204.210 và nhập mật khẩu
+
+### 2. Copy binary sang router bằng SCP
+Copy ba binary sang router OpenWrt tương thích (bản này nhắm AArch64/musl):
+
+```sh
+ROUTER_DEST='root@10.2.204.211'
+
+ssh "$ROUTER_DEST" 'mkdir -p /usr/libexec/router-agent'
+
+scp -O -p build/mcp_stdio_server build/runtime_probe build/rollback_guard \
+  "$ROUTER_DEST:/usr/libexec/router-agent/"
+
+scp -O -p files/init.d/router-agent-rollback-guard \
+  "$ROUTER_DEST:/tmp/router-agent-rollback-guard"
+```
+
+`-O` dùng giao thức SCP cũ, tương thích tốt với SSH server Dropbear thường có
+trên OpenWrt. Nếu router dùng OpenSSH hiện đại và báo lỗi với `-O`, có thể bỏ cờ
+này.
+
+### 3. Bật rollback guard và kiểm tra
+
+Rollback guard tự khôi phục cấu hình cũ nếu đổi IP LAN không được ứng dụng xác
+nhận lại trước hạn chót. Cài và bật service trên router:
+
+```sh
+ssh "$ROUTER_DEST" '
+  chmod 755 /usr/libexec/router-agent/mcp_stdio_server \
+    /usr/libexec/router-agent/runtime_probe \
+    /usr/libexec/router-agent/rollback_guard
+  chmod 755 /usr/libexec/router-agent/*
+  install -m 0755 /tmp/router-agent-rollback-guard \
+    /etc/init.d/router-agent-rollback-guard
+  /etc/init.d/router-agent-rollback-guard enable
+  /etc/init.d/router-agent-rollback-guard restart
+  ls -l /usr/libexec/router-agent
+  ps | grep "[r]ollback_guard"
+'
+```
+
+Khi lệnh cuối hiển thị `rollback_guard`, router đã sẵn sàng để app kết nối qua
+IP LAN. Nếu chỉ muốn kiểm tra khả năng runtime trước khi dùng app, chạy:
+
+```sh
+ssh "$ROUTER_DEST" /usr/libexec/router-agent/runtime_probe
+```
+
+> Không dừng hoặc cập nhật `rollback_guard` khi đang có một giao dịch đổi mạng
+> chờ xác nhận. Nếu cần cập nhật, chỉ thực hiện sau khi không còn giao dịch
+> pending.
+Không dừng `rollback_guard` khi đang đổi IP LAN. Dùng IP LAN của router và giữ
+đường quản trị dự phòng khi thử thay đổi mạng.
+
+---
 
 ## Chạy app
 
