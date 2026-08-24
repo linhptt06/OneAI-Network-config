@@ -84,35 +84,14 @@ binary đã build**. Bản build hiện tại nhắm `aarch64_cortex-a53` dùng 
 copy binary này sang router MIPS, ARM 32-bit, x86_64 hoặc firmware không tương
 thích.
 
-> Trước khi thử đổi IP LAN, hãy chuẩn bị serial console hoặc một đường quản trị
-> dự phòng. Thay đổi IP có thể làm ngắt SSH trong chốc lát.
-
 ### 1. Build trên build server
-
-Trên máy có OpenWrt SDK/cross-compiler và checkout đầy đủ
-`router-agent-build-server` (chỉ thư mục `src/` không đủ để build), chạy:
-Trên build server có OpenWrt SDK và checkout đầy đủ
-`router-agent-build-server` (chỉ `src/` không build được):
-
-```sh
-cd /duong-dan/toi/router-agent-build-server
-make clean
-make
-make test
-file build/mcp_stdio_server build/runtime_probe build/rollback_guard
-```
-
-Ba file cuối phải được nhận diện là ELF AArch64/musl dành cho OpenWrt. Không
-chạy chúng trên macOS hoặc copy binary build cho sai kiến trúc sang router.
+Đăng nhập vào server build: ssh inter01@10.2.204.210 và nhập mật khẩu
 
 ### 2. Copy binary sang router bằng SCP
-
-Đặt IP LAN của router trong biến terminal; không ghi IP hoặc mật khẩu vào source
-code hay README:
 Copy ba binary sang router OpenWrt tương thích (bản này nhắm AArch64/musl):
 
 ```sh
-ROUTER_DEST='root@192.168.1.1'
+ROUTER_DEST='root@10.2.204.211'
 
 ssh "$ROUTER_DEST" 'mkdir -p /usr/libexec/router-agent'
 
