@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:chatbot/net/network_apply_flow.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -15,6 +17,8 @@ void main() {
         approved: false,
         proto: 'static',
         planToken: expectedPlanToken,
+        previewHealthToken: expectedHealthToken,
+        previewDeadlineSeconds: 2000000000,
         apply: (_) async {
           applyCalls++;
           return {};
@@ -39,6 +43,8 @@ void main() {
         approved: true,
         proto: 'dhcp',
         planToken: expectedPlanToken,
+        previewHealthToken: expectedHealthToken,
+        previewDeadlineSeconds: 2000000000,
         apply: (_) async {
           applyCalls++;
           return {};
@@ -60,6 +66,8 @@ void main() {
         approved: true,
         proto: 'static',
         planToken: expectedPlanToken,
+        previewHealthToken: expectedHealthToken,
+        previewDeadlineSeconds: 2000000000,
         apply: (arguments) async {
           applyCalls++;
           expect(arguments, {
@@ -90,6 +98,33 @@ void main() {
       );
     });
 
+    test('does not return before health confirmation completes', () async {
+      final healthGate = Completer<bool>();
+      var completed = false;
+
+      final pending =
+          runApprovedNetworkApply(
+            applyEnabled: true,
+            approved: true,
+            proto: 'static',
+            planToken: expectedPlanToken,
+            previewHealthToken: expectedHealthToken,
+            previewDeadlineSeconds: 2000000000,
+            apply: (_) async => {},
+            reconnectAndConfirmHealth:
+                ({required healthToken, required deadlineSeconds}) =>
+                    healthGate.future,
+          ).then((result) {
+            completed = true;
+            return result;
+          });
+
+      await Future<void>.delayed(Duration.zero);
+      expect(completed, isFalse);
+      healthGate.complete(true);
+      expect((await pending).status, 'confirmed');
+    });
+
     test('reconnect or health-confirm failure never reports success', () async {
       var applyCalls = 0;
 
@@ -98,6 +133,8 @@ void main() {
         approved: true,
         proto: 'static',
         planToken: expectedPlanToken,
+        previewHealthToken: expectedHealthToken,
+        previewDeadlineSeconds: 2000000000,
         apply: (_) async {
           applyCalls++;
           return {'health_token': expectedHealthToken, 'deadline': 2000000000};
@@ -119,6 +156,8 @@ void main() {
         approved: true,
         proto: 'static',
         planToken: expectedPlanToken,
+        previewHealthToken: expectedHealthToken,
+        previewDeadlineSeconds: 2000000000,
         apply: (_) async {
           applyCalls++;
           return {};
