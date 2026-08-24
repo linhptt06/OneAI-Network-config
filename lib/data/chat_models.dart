@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:llamadart/llamadart.dart';
 
-/// A stored conversation (one chat thread).
+/// Một hội thoại đã lưu (một luồng chat).
 class Conversation {
   final int id;
   final String title;
@@ -24,40 +24,38 @@ class Conversation {
   );
 }
 
-/// What kind of row a stored message is.
+/// Loại của một bản ghi tin nhắn.
 ///
-/// This is a superset of [LlamaChatRole]: tool calls are stored as their own
-/// kind so the UI can render "the model asked to run X" separately from the
-/// assistant's prose, while both still map back to an assistant-role message
-/// when the history is replayed into the engine.
+/// Rộng hơn [LlamaChatRole]: tool call được lưu thành loại riêng để UI hiển
+/// thị "model xin chạy X" tách khỏi văn bản của trợ lý, dù khi phát lại vào
+/// engine cả hai đều trở về vai assistant.
 enum StoredMessageKind { user, assistant, toolCall, toolResult }
 
-/// A single persisted message.
+/// Một tin nhắn đã lưu.
 ///
-/// llamadart's [ChatSession] keeps history in memory only, so this app owns the
-/// full history in SQLite and replays it into [LlamaEngine.create] on every
-/// turn. [toLlamaMessage] is the bridge back to the engine's message type.
+/// [ChatSession] của llamadart chỉ giữ lịch sử trong RAM, nên app tự giữ toàn
+/// bộ lịch sử trong SQLite và phát lại ở mỗi lượt. [toLlamaMessage] là cầu nối
+/// trở về kiểu tin nhắn của engine.
 class StoredMessage {
   final int id;
   final int conversationId;
   final StoredMessageKind kind;
 
-  /// Prose content for user/assistant rows, or the tool result payload
-  /// (JSON-encoded) for tool-result rows.
+  /// Văn bản với bản ghi user/assistant, hoặc payload JSON của kết quả tool.
   final String content;
 
-  /// Model reasoning, when the model emits it. Kept out of [content] so it can
-  /// be collapsed in the UI and excluded from the replayed prompt.
+  /// Phần suy luận của model, nếu có. Để riêng khỏi [content] để UI thu gọn
+  /// được và không phát lại vào prompt.
   final String? reasoning;
 
-  /// Tool name, for [StoredMessageKind.toolCall] and
-  /// [StoredMessageKind.toolResult] rows.
+  /// Tên tool, cho bản ghi [StoredMessageKind.toolCall] và
+  /// [StoredMessageKind.toolResult].
   final String? toolName;
 
-  /// Tool call id, used to pair a call with its result.
+  /// Id của lời gọi tool, dùng để ghép lời gọi với kết quả.
   final String? toolCallId;
 
-  /// Raw JSON arguments the model generated, for tool-call rows.
+  /// Tham số JSON thô model sinh ra, cho bản ghi tool call.
   final String? toolArgumentsJson;
 
   final DateTime createdAt;
@@ -97,7 +95,7 @@ class StoredMessage {
     }
   }
 
-  /// Converts this row back into the message type the engine consumes.
+  /// Chuyển bản ghi này về kiểu tin nhắn mà engine nhận.
   LlamaChatMessage toLlamaMessage() {
     switch (kind) {
       case StoredMessageKind.user:

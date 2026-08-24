@@ -1,9 +1,9 @@
 import 'package:llamadart/llamadart.dart';
 
-/// Narrows app-owned tool schemas to capabilities advertised by a router.
+/// Lọc schema tool của app theo danh sách capability router khai báo.
 ///
-/// The router contributes names only; descriptions and parameter schemas stay
-/// in the app, so device output can never become model prompt text.
+/// Router chỉ góp tên; mô tả và schema tham số vẫn thuộc app, nên dữ liệu từ
+/// thiết bị không bao giờ trở thành prompt của model.
 List<ToolDefinition> negotiateTools(
   List<ToolDefinition> appTools,
   Set<String> deviceToolNames,

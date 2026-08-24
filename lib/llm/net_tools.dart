@@ -9,19 +9,17 @@ import '../net/tool_host.dart';
 import '../net/validation.dart';
 import 'tool_catalogue.dart';
 
-/// Tools that let the model read OpenWrt configuration.
+/// Các tool model được phép gọi lên router OpenWrt.
 ///
-/// This file owns the tool *interface*: the names, descriptions and parameter
-/// schemas the model sees, plus the validation that rejects a bad value before
-/// it costs a round trip. It owns nothing about UCI.
+/// File này sở hữu *giao diện* tool: tên, mô tả, schema tham số mà model nhìn
+/// thấy, cộng phần validate chặn giá trị sai trước khi tốn một vòng đi router.
+/// Nó không biết gì về UCI.
 ///
-/// Tool names match the agent's exactly. They are not a stylistic choice: the
-/// device advertises names, the app matches on them, and a private naming
-/// scheme would mean nothing lines up.
+/// Tên tool trùng khớp với agent, không phải chuyện thẩm mỹ: thiết bị khai tên,
+/// app đối chiếu theo tên, đặt tên riêng thì không khớp được gì cả.
 ///
-/// Only read tools exist here. The agent has no mutating tool yet, and a tool
-/// that always fails is worse than a missing one — a 1.5B model derails for the
-/// rest of the turn.
+/// Tất cả đều là tool đọc, trừ `network_set_preview` — đường ghi duy nhất, và
+/// nó cũng chỉ staging thay đổi để hộp thoại xác nhận duyệt.
 List<ToolDefinition> buildNetworkTools(DeviceStore store, ToolHost host) => [
   _listDevices(store),
   _connectDevice(store, host),
@@ -33,45 +31,40 @@ List<ToolDefinition> buildNetworkTools(DeviceStore store, ToolHost host) => [
   _networkSetPreview(store, host),
 ];
 
-/// The only router tools that may ever be exposed to the LLM.
+/// Những tool router duy nhất được phép lộ ra cho LLM.
 ///
-/// Doubles as the local/remote boundary: every name in here runs on the router
-/// (and therefore calls `host.requireClient()`), everything else in the
-/// catalogue runs on the phone. [toolsFor] relies on that, and so does the
-/// `unavailable_tools` report in `connect_device`.
+/// Cũng chính là ranh giới cục bộ/từ xa: mọi tên trong đây chạy trên router
+/// (nên đều gọi `host.requireClient()`), phần còn lại chạy trên điện thoại.
+/// [toolsFor] và báo cáo `unavailable_tools` đều dựa vào ranh giới này.
 const Set<String> kLlmRouterToolNames = {
   'network_get',
   'network_list',
   'wifi_get',
   'route_info',
   'traffic_stats',
-  // This is the only network-changing action the model can request. Its
-  // handler performs the preview and presents the native confirmation dialog.
+  // Thao tác đổi mạng duy nhất model xin được. Handler của nó tạo bản xem
+  // trước rồi mở hộp thoại xác nhận của hệ thống.
   'network_set_preview',
 };
 
-/// Backward-compatible name used by existing capability tests.
+/// Tên cũ của [kLlmRouterToolNames], giữ lại cho các test capability.
+///
+/// Tên này có trước `network_set_preview`; tập hợp không còn chỉ-đọc nữa.
 const Set<String> kReadToolNames = kLlmRouterToolNames;
 
-/// The tools worth putting in the prompt for the current connection state.
+/// Những tool đáng đưa vào prompt ứng với trạng thái kết nối hiện tại.
 ///
-/// [catalogue] is the whole list from [buildNetworkTools]; the return value is
-/// the subset whose schemas earn their tokens right now:
+/// - **Chưa kết nối:** chỉ tool cục bộ. Tool đọc lúc này chỉ ném được "Chưa
+///   kết nối tới thiết bị nào", nên schema của nó tốn context vô ích.
+/// - **Đã kết nối:** thêm các tool router mà *thiết bị này* khai báo. Tool
+///   firmware không có thì không đưa ra, thay vì bị gọi rồi trả
+///   `unsupported_tool`.
 ///
-/// - **Not connected:** local tools only. A read tool here can do nothing but
-///   throw "Chưa kết nối tới thiết bị nào", so its schema costs context on
-///   every turn and offers the model a round it cannot win.
-/// - **Connected:** local tools, plus the router tools *this* device declares.
-///   A tool the firmware does not have stops being offered at all, instead of
-///   being called and answered with `unsupported_tool`.
+/// Catalogue được tách trước khi lọc chứ không lọc cả cụm: `list_devices` và
+/// `connect_device` chạy trên điện thoại nên router không bao giờ khai tên
+/// chúng — lọc cả cụm sẽ mất luôn tool để kết nối, và không có đường quay lại.
 ///
-/// The catalogue is split before filtering, not filtered whole. `list_devices`
-/// and `connect_device` run on the phone, so the router never names them —
-/// handing the full catalogue to [negotiateTools] would drop the one tool the
-/// model needs to connect in the first place, and there would be no way back.
-///
-/// Only names cross the boundary here: every description and parameter schema
-/// still comes from this file. See [negotiateTools].
+/// Chỉ có tên đi qua ranh giới này; mọi mô tả và schema vẫn từ file này.
 List<ToolDefinition> toolsFor(
   List<ToolDefinition> catalogue,
   Set<String> deviceToolNames,
@@ -84,26 +77,24 @@ List<ToolDefinition> toolsFor(
   return [...local, ...remote];
 }
 
-// Defaults, so the model has something valid to send when the user asks a
-// general question. The model cannot discover these: the agent exposes no tool
-// that lists sections, so a wrong guess has no path back to a right one.
+// Giá trị mặc định để model luôn có cái hợp lệ mà gửi khi người dùng hỏi
+// chung chung. Model không tự tìm ra được: agent không có tool liệt kê section,
+// nên đoán sai là không có đường sửa.
 const String kDefaultNetworkInterface = 'lan';
 
-/// Read off the target board (MediaTek MT7993). Stock OpenWrt would call this
-/// `default_radio0`; vendor firmware does not.
+/// Đọc từ board đích (MediaTek MT7993). OpenWrt gốc gọi là `default_radio0`,
+/// firmware hãng thì không.
 const String kDefaultWifiSection = 'ra0';
 const String kDefaultTrafficInterface = 'br-lan';
 
-/// Wireless sections offered to the model, read off the target board.
+/// Các section wireless đưa cho model, đọc từ board đích.
 ///
-/// Declared as an enum parameter rather than listed in prose. A description is
-/// advice a 1.5B model ignores — it invented `wlan0` with these very names in
-/// front of it — while an enum becomes a GBNF grammar constraint the sampler
-/// cannot leave. Same mechanism as the value lists in `validation.dart`.
+/// Khai báo dạng enum chứ không kể trong mô tả: mô tả chỉ là lời khuyên mà
+/// model nhỏ bỏ qua — nó từng bịa ra `wlan0` dù có sẵn danh sách này trước mặt
+/// — còn enum thành ràng buộc grammar GBNF mà sampler không thoát ra được.
 ///
-/// `apcli0`/`apclix0` are left out on purpose: they are uplinks to someone
-/// else's network, and reporting one as "your WiFi" would be a confident lie.
-/// `apmld1` is left out because `wifi_get` rejects its type outright.
+/// Cố ý bỏ `apcli0`/`apclix0`: đó là uplink sang mạng của người khác, gọi nó
+/// là "WiFi của bạn" là nói dối. Bỏ `apmld1` vì `wifi_get` từ chối kiểu đó.
 const List<String> kWifiSections = [
   'ra0',
   'ra1',
@@ -114,11 +105,11 @@ const List<String> kWifiSections = [
   'MT7993_1_2',
 ];
 
-/// Network sections offered to the model. `wan6` is the IPv6 half of the WAN.
+/// Các interface mạng đưa cho model. `wan6` là nửa IPv6 của WAN.
 const List<String> kNetworkInterfaces = ['lan', 'wan', 'wan6'];
 
 // ---------------------------------------------------------------------------
-// Local tools — these run on the phone, not on the router
+// Tool cục bộ — chạy trên điện thoại, không phải trên router
 // ---------------------------------------------------------------------------
 
 ToolDefinition _listDevices(DeviceStore store) => ToolDefinition(
@@ -137,10 +128,9 @@ ToolDefinition _listDevices(DeviceStore store) => ToolDefinition(
   },
 );
 
-/// Kết nối tới router. Tham số `device` là chỗ yếu nhất của cả file: nó là tham
-/// số tự do duy nhất, lại là tham số model buộc phải điền đúng. Alias sai hiện
-/// đi thẳng ra ngoài thành `{'error': ...}` trần, không `hint`, không
-/// `valid_values` — xem W1 trong `docs/RA-SOAT-TOOL-SCHEMA.md`.
+/// Kết nối tới router. `device` là chỗ yếu nhất của cả file: tham số tự do duy
+/// nhất, lại là thứ model buộc phải điền đúng. Alias sai hiện đi thẳng ra
+/// ngoài thành `{'error': ...}` trần, không `hint`, không `valid_values`.
 ToolDefinition _connectDevice(
   DeviceStore store,
   ToolHost host,
@@ -165,24 +155,21 @@ ToolDefinition _connectDevice(
 
     final McpServerInfo server;
     try {
-      // The device describes itself here — identity and supported tools in
-      // one exec, instead of the app probing for them.
+      // Thiết bị tự khai ở đây: danh tính và danh sách tool trong một lần
+      // exec, thay vì app phải dò từng thứ.
       server = await client.connect();
     } catch (_) {
-      // Between connectByAlias and adopt, the session is live but unowned:
-      // ToolHost does not hold it yet, so nothing would ever close it. A
-      // router without the agent installed fails exactly here, and the model
-      // is told to retry — so this leaked one SSH connection per attempt,
-      // for the rest of the app's life.
+      // Giữa connectByAlias và adopt, phiên đang sống nhưng vô chủ: ToolHost
+      // chưa giữ nên không ai đóng nó. Router chưa cài agent hỏng đúng ở đây
+      // và model được bảo thử lại — mỗi lần thử là rò một kết nối SSH.
       await session.close();
       rethrow;
     }
     await host.adopt(session, client);
 
-    // `tools/list` is the router's capability report, not the app's
-    // catalogue. Only report the intersection: a newer router may expose
-    // a name this build has no schema or safe handler for, and showing it
-    // as available makes the model ask for a tool it cannot invoke.
+    // `tools/list` là báo cáo capability của router, không phải catalogue của
+    // app. Chỉ lấy phần giao: router mới có thể khai tên mà bản build này chưa
+    // có schema hay handler an toàn.
     final supported = kLlmRouterToolNames.intersection(server.toolNames);
     final missing = kLlmRouterToolNames.difference(server.toolNames);
     return {
@@ -191,17 +178,16 @@ ToolDefinition _connectDevice(
       'agent': server.name,
       'agent_version': server.version,
       'supported_tools': supported.toList()..sort(),
-      // Not what keeps the model from calling a missing tool — [toolsFor]
-      // does that by not offering it. This is the *explanation* for the
-      // absence, so the model can say "router này không đọc được lưu
-      // lượng" instead of being silently unable to.
+      // Không phải thứ chặn model gọi tool thiếu — [toolsFor] làm việc đó
+      // bằng cách không đưa ra. Đây là *lời giải thích* cho sự vắng mặt, để
+      // model nói được "router này không đọc được lưu lượng".
       if (missing.isNotEmpty) 'unavailable_tools': missing.toList()..sort(),
     };
   },
 );
 
 // ---------------------------------------------------------------------------
-// Read tools — forwarded to the agent
+// Tool đọc — chuyển tiếp xuống agent
 // ---------------------------------------------------------------------------
 
 ToolDefinition _networkGet(ToolHost host) => _readTool(
@@ -263,20 +249,18 @@ ToolDefinition _trafficStats(ToolHost host) => _readTool(
   argument: 'interface',
   argumentDescription:
       'Tên cổng mạng của hệ điều hành. Bỏ trống thì đọc $kDefaultTrafficInterface.',
-  // Free-form on purpose: OS device names follow the network configuration,
-  // so a fixed list would reject names that are perfectly valid on another
-  // board — unlike the UCI section names, which this build does know.
+  // Cố ý để tự do: tên cổng của hệ điều hành phụ thuộc cấu hình mạng, danh
+  // sách cứng sẽ chặn nhầm tên hợp lệ trên board khác.
   defaultValue: kDefaultTrafficInterface,
   validate: validateInterfaceName,
 );
 
-/// Creates a LAN change preview and owns the entire confirmation boundary.
+/// Tạo bản xem trước đổi LAN và giữ toàn bộ ranh giới xác nhận.
 ///
-/// `network_set_apply` intentionally has no [ToolDefinition]. The model never
-/// sees a plan token and can therefore never apply a network change itself.
-/// After the native confirmation dialog, the app owns apply, reconnect, and
-/// health confirmation end-to-end. DHCP remains preview-only because its new
-/// address cannot be known reliably enough to reconnect safely.
+/// `network_set_apply` cố ý không có [ToolDefinition]: model không bao giờ
+/// thấy plan token nên không tự áp dụng thay đổi được. Sau khi người dùng bấm
+/// đồng ý, app tự lo apply, kết nối lại và xác nhận sức khoẻ. DHCP chỉ dừng ở
+/// xem trước vì không biết chắc địa chỉ mới để kết nối lại an toàn.
 ToolDefinition _networkSetPreview(
   DeviceStore store,
   ToolHost host,
@@ -325,8 +309,8 @@ ToolDefinition _networkSetPreview(
 
     final client = host.requireClient();
     try {
-      // This read is deliberately enforced in code, not merely requested in
-      // the prompt. The preview is always made against an observed baseline.
+      // Bước đọc này ép trong code chứ không chỉ nhờ prompt, để bản xem trước
+      // luôn dựa trên hiện trạng quan sát được.
       final current = await client.callTool('network_get', {
         'interface': interface,
       });
@@ -453,13 +437,12 @@ Map<String, dynamic> _safePreview(Map<String, dynamic> preview) => {
   if (preview['diff'] is Map) 'diff': preview['diff'],
 };
 
-/// A tool that only reads. No staging, no confirmation, no result shape of its
-/// own — the agent's reply goes straight to the model.
+/// Tool chỉ đọc: không staging, không xác nhận, không định dạng kết quả riêng
+/// — phản hồi của agent đi thẳng tới model.
 ///
-/// At most one parameter, because that is all the agent accepts: its schema
-/// sets `additionalProperties: false` and it re-checks that the argument object
-/// holds nothing but the declared field. Anything extra is rejected outright,
-/// so the payload is rebuilt here rather than forwarded as the model wrote it.
+/// Nhiều nhất một tham số, vì agent chỉ nhận thế: schema đặt
+/// `additionalProperties: false` và kiểm lại lần nữa. Thừa field là bị từ chối
+/// thẳng, nên payload được dựng lại ở đây thay vì bê nguyên model viết.
 ToolDefinition _readTool(
   ToolHost host, {
   required String name,
@@ -494,9 +477,8 @@ ToolDefinition _readTool(
         final value = (written == null || written.isEmpty)
             ? defaultValue!
             : written;
-        // Runs even when the grammar already constrained the value: the
-        // grammar binds the model, not a future edit to this file, and this is
-        // the path to a network device.
+        // Vẫn chạy dù grammar đã ràng buộc giá trị: grammar ràng model chứ
+        // không ràng lần sửa file này sau này, mà đây là đường ra thiết bị.
         validate?.call(value);
         arguments[argument] = value;
       }
@@ -504,32 +486,28 @@ ToolDefinition _readTool(
       try {
         return await host.requireClient().callTool(name, arguments);
       } on AgentErrorException catch (error) {
-        // Returned as data rather than thrown. The turn loop would also hand a
-        // thrown error to the model, but without the hint — and the hint is
-        // what stops a small model from retrying a call that cannot succeed.
+        // Trả về dạng dữ liệu chứ không ném: ném thì model vẫn nhận được lỗi
+        // nhưng mất hint — thứ ngăn model nhỏ thử lại một lời gọi vô vọng.
         return explainAgentError(error, choices);
       }
     },
   );
 }
 
-/// Turns an agent error into something the model can act on.
+/// Biến lỗi từ agent thành thứ model hành động được.
 ///
-/// [choices] is repeated back on failure because the model has no tool that
-/// lists valid names, and by the time an error arrives the tool description may
-/// have fallen out of its context window.
+/// [choices] được nhắc lại khi lỗi vì model không có tool nào liệt kê tên hợp
+/// lệ, và lúc lỗi về thì mô tả tool có thể đã rơi khỏi context.
 ///
-/// Public so the contract it defines can be tested. Nothing else calls it: this
-/// is the only shape a failed read reaches the model in, and the hint inside it
-/// is the only thing that tells a 1.5B model whether to retry or to stop.
+/// Để public cho test kiểm chứng hợp đồng này. Đây là hình dạng duy nhất một
+/// lỗi đọc đến được model, và hint bên trong là thứ bảo nó thử lại hay dừng.
 Map<String, dynamic> explainAgentError(
   AgentErrorException error,
   List<String>? choices,
 ) {
-  // Withheld when the tool itself is absent, even though the values are still
-  // valid names. A list of alternatives sitting next to "đừng gọi lại" reads as
-  // an invitation to try the next one, and with a small model the data wins over
-  // the prose. Nothing in valid_values can fix a tool the firmware lacks.
+  // Giấu đi khi chính tool không tồn tại, dù các giá trị vẫn là tên hợp lệ.
+  // Một danh sách gợi ý nằm cạnh "đừng gọi lại" đọc như lời mời thử tiếp, và
+  // với model nhỏ thì dữ liệu thắng lời văn.
   final worthRetrying = !isUnsupportedTool(error.code);
 
   return {
@@ -540,13 +518,11 @@ Map<String, dynamic> explainAgentError(
   };
 }
 
-/// The advice attached to [code]: retry, or stop and say why.
+/// Lời khuyên kèm theo [code]: thử lại, hay dừng và nói rõ lý do.
 String hintForAgentError(String code, List<String>? choices) {
   if (isUnsupportedTool(code)) {
-    // Used to fall through to the "wrong parameter" branch below, which sent the
-    // model hunting for another section name on a tool that does not exist on
-    // this device — the exact wasted turn the rest of this file is built to
-    // prevent.
+    // Trước đây rơi xuống nhánh "sai tham số" bên dưới, khiến model đi tìm
+    // tên section khác cho một tool không tồn tại trên thiết bị.
     return 'Thiết bị này không có chức năng đó, và lượt sau cũng vậy. Đừng gọi '
         'lại công cụ này và đừng thử tên khác; hãy nói với người dùng là router '
         'không hỗ trợ việc này.';
@@ -562,8 +538,8 @@ String hintForAgentError(String code, List<String>? choices) {
       : 'thử lại nhiều nhất MỘT lần với một tên khác trong valid_values';
 
   if (isAmbiguousFailure(code)) {
-    // The router collapses every tool error into this one code, so neither
-    // reading can be ruled out. Saying so is more useful than picking wrong.
+    // Router gộp mọi lỗi tool vào đúng một mã này nên không loại trừ được
+    // cách hiểu nào. Nói thẳng là không rõ còn hơn đoán sai.
     return 'Router không nói rõ nguyên nhân. Có thể tên không tồn tại trên '
         'thiết bị này, cũng có thể router đang trục trặc. Hãy $retry; vẫn lỗi '
         'thì báo người dùng, đừng lặp thêm.';

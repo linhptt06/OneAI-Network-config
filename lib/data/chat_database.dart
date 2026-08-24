@@ -4,17 +4,17 @@ import 'package:sqflite/sqflite.dart';
 
 import 'chat_models.dart';
 
-/// SQLite-backed store for conversations and messages.
+/// Kho lưu hội thoại và tin nhắn trên SQLite.
 ///
-/// This is the app's source of truth for chat history. The engine is stateless
-/// between turns; every request replays a window of rows from here.
+/// Đây là nguồn sự thật của lịch sử chat. Engine không nhớ gì giữa các lượt;
+/// mỗi yêu cầu phát lại một cửa sổ bản ghi lấy từ đây.
 class ChatDatabase {
   ChatDatabase._(this._db);
 
   final Database _db;
 
-  /// The underlying handle, so sibling stores (device profiles) can share the
-  /// same database file instead of opening a second one.
+  /// Handle gốc, để các kho khác (hồ sơ thiết bị) dùng chung một file database
+  /// thay vì mở thêm file thứ hai.
   Database get raw => _db; 
 
   static Future<ChatDatabase> open() async {
@@ -58,7 +58,7 @@ class ChatDatabase {
 
   Future<void> close() => _db.close();
 
-  // ---------------------------------------------------------------- conversations
+  // ---------------------------------------------------------------- hội thoại
 
   Future<List<Conversation>> listConversations() async {
     final rows = await _db.query('conversations', orderBy: 'updated_at DESC');
@@ -102,9 +102,9 @@ class ChatDatabase {
     );
   }
 
-  // -------------------------------------------------------------------- messages
+  // ---------------------------------------------------------------- tin nhắn
 
-  /// Returns every message in a conversation, oldest first (for the UI).
+  /// Trả về mọi tin nhắn của một hội thoại, cũ trước (dùng cho UI).
   Future<List<StoredMessage>> listMessages(int conversationId) async {
     final rows = await _db.query(
       'messages',
@@ -115,12 +115,11 @@ class ChatDatabase {
     return rows.map(StoredMessage.fromRow).toList();
   }
 
-  /// Returns the newest [limit] messages, oldest first (for the prompt window).
+  /// Trả về [limit] tin nhắn mới nhất, cũ trước (dùng cho cửa sổ prompt).
   ///
-  /// The engine has a fixed context window, so old turns are dropped rather
-  /// than sent. 10 rather than 40 because the network tool schemas take about
-  /// 1.2k of the 4096-token context before any conversation; raise it only
-  /// alongside `contextSize`.
+  /// Context của engine có hạn nên lượt cũ bị bỏ chứ không gửi. Giữ ở 12 vì
+  /// schema các tool mạng đã chiếm một phần context trước khi có chữ nào của
+  /// hội thoại; chỉ tăng cùng lúc với `contextSize`.
   Future<List<StoredMessage>> recentMessages(
     int conversationId, {
     int limit = 12,

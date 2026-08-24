@@ -6,6 +6,7 @@ import 'llm/llm_service.dart';
 import 'llm/net_tools.dart';
 import 'net/device_profile.dart';
 import 'net/tool_host.dart';
+import 'ui/app_theme.dart';
 import 'ui/conversation_list_screen.dart';
 
 Future<void> main() async {
@@ -33,22 +34,19 @@ class ChatbotApp extends StatefulWidget {
 class _ChatbotAppState extends State<ChatbotApp> {
   final _llm = LlmService();
 
-  /// Holds the live SSH session and the confirmation callback. Built once
-  /// here so the session survives navigation between screens.
-  // The router agent supports an expiring rollback guard and health-confirm.
-  // The LLM still cannot enable this: it is only reached after the native UI
-  // confirmation in the preview handler.
+  /// Giữ phiên SSH đang sống và callback xác nhận. Dựng một lần ở đây để
+  /// phiên không mất khi chuyển màn hình.
+  // Agent trên router có rollback guard hết hạn và bước health-confirm. LLM
+  // vẫn không bật được cờ này: chỉ tới được sau khi người dùng bấm đồng ý.
   final _toolHost = ToolHost(networkApplyEnabled: true);
 
-  /// The full tool catalogue — every tool this build can execute.
+  /// Toàn bộ catalogue — mọi tool bản build này chạy được.
   ///
-  /// Not the list the model sees: `toolsFor` narrows this per round to the tools
-  /// the current connection can actually serve, so nothing is built here that
-  /// depends on which device is connected.
+  /// Không phải danh sách model nhìn thấy: `toolsFor` lọc lại theo từng vòng
+  /// dựa trên thiết bị đang kết nối.
   ///
-  /// Keep this list short anyway. A 1.5B model degrades as it grows: with four
-  /// extra demo tools present it began narrating intent ("đang kiểm tra…")
-  /// instead of emitting a call, because the schemas crowded the context window.
+  /// Vẫn nên giữ danh sách ngắn. Thêm bốn tool demo là model bắt đầu kể lể
+  /// ("đang kiểm tra…") thay vì gọi tool, vì schema chiếm hết context.
   late final List<ToolDefinition> _tools = buildNetworkTools(
     widget.deviceStore,
     _toolHost,
@@ -57,8 +55,7 @@ class _ChatbotAppState extends State<ChatbotApp> {
   @override
   void initState() {
     super.initState();
-    // Not awaited: the UI renders immediately and the status banner reports
-    // download/load progress as it happens.
+    // Không await: UI hiện ngay, banner trạng thái báo tiến độ tải/nạp.
     _llm.load();
   }
 
@@ -73,9 +70,9 @@ class _ChatbotAppState extends State<ChatbotApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Chatbot',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: ThemeMode.system,
       home: ConversationListScreen(
         database: widget.database,
         deviceStore: widget.deviceStore,

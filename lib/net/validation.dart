@@ -1,20 +1,23 @@
-/// Input checks and the value sets the model is constrained to.
+/// Các phép kiểm đầu vào phía app.
 ///
 /// **Thuộc về app**, dù agent sẽ validate lại. Trùng lặp là có chủ đích:
 ///
-/// * ở app, kiểm tra sớm cho người dùng thông báo rõ ràng mà không tốn một
-///   vòng đi tới thiết bị, và các danh sách giá trị bên dưới trở thành ràng
-///   buộc grammar nên model không sinh được giá trị ngoài danh sách;
-/// * ở agent, kiểm tra lại vì không bao giờ được tin client — kể cả một app
-///   hợp lệ cũng có thể có lỗi.
+/// * ở app, kiểm sớm để báo lỗi rõ cho người dùng mà không tốn một vòng đi
+///   tới thiết bị;
+/// * ở agent, kiểm lại vì không bao giờ được tin client — kể cả app hợp lệ
+///   cũng có thể có lỗi.
+///
+/// Ràng buộc grammar cho model nằm ở `net_tools.dart` (`ToolParam.enumType`),
+/// không phải ở đây.
 library;
 
-/// Valid `encryption` values for a wifi-iface.
+/// Các giá trị `encryption` hợp lệ của một wifi-iface.
 ///
-/// The `+ccmp` / `+tkip` suffixes pin the cipher and are what MediaTek SDK
-/// images actually store (`psk2+ccmp`). They are listed explicitly so the
-/// grammar lets the model preserve an existing value instead of being forced
-/// to downgrade it to bare `psk2`.
+/// Hậu tố `+ccmp` / `+tkip` ghim cipher và đúng là thứ firmware MediaTek lưu
+/// (`psk2+ccmp`). Liệt kê tường minh để giữ được giá trị sẵn có thay vì hạ
+/// xuống `psk2` trơn.
+///
+/// Chưa có tool ghi WiFi nào dùng danh sách này; hiện chỉ test tham chiếu tới.
 const List<String> kWifiEncryptionModes = [
   'none',
   'psk',
@@ -28,26 +31,25 @@ const List<String> kWifiEncryptionModes = [
   'owe',
 ];
 
-/// Valid `proto` values this app supports for the WAN interface.
+/// Các giá trị `proto` app hỗ trợ cho interface WAN. Cũng chưa có tool nào
+/// dùng tới.
 const List<String> kWanProtocols = ['dhcp', 'static', 'pppoe', 'none'];
 
-/// Longest OS interface name the agent accepts.
+/// Độ dài tối đa của tên cổng mạng mà agent chấp nhận.
 ///
-/// `VALIDATOR_INTERFACE_SIZE` is 16 and the agent requires `length < 16`. The
-/// MCP schema advertises `maxLength: 63` for the same field, so a 20-character
-/// name passes the protocol layer and then fails inside the tool. Checking the
-/// tighter bound here turns that into a clear message instead of a round trip.
+/// Agent yêu cầu `length < 16`, nhưng schema MCP lại khai `maxLength: 63` cho
+/// cùng field — nên tên 20 ký tự lọt qua tầng giao thức rồi mới hỏng bên trong
+/// tool. Kiểm cận chặt hơn ở đây để báo lỗi rõ thay vì tốn một vòng đi router.
 const int kMaxInterfaceNameLength = 15;
 
-/// Longest UCI section name the agent accepts (`VALIDATOR_UCI_SECTION_SIZE`).
+/// Độ dài tối đa của tên section UCI mà agent chấp nhận.
 const int kMaxUciSectionNameLength = 63;
 
-/// Mirrors `validator_uci_section` on the device.
+/// Bản sao của `validator_uci_section` trên thiết bị.
 ///
-/// Letters, digits, `_` and `-` only — no dots, and no leading `@`, which is
-/// how UCI writes anonymous sections. The agent rejects those on purpose: an
-/// anonymous selector is position-dependent and would silently point at a
-/// different section after any edit.
+/// Chỉ chữ, số, `_` và `-`: không có dấu chấm, không mở đầu bằng `@` (cách UCI
+/// viết section vô danh). Agent cố ý từ chối `@` vì bộ chọn vô danh phụ thuộc
+/// vị trí, sau một lần sửa là âm thầm trỏ sang section khác.
 bool isValidUciSectionName(String value) {
   if (value.isEmpty || value.length > kMaxUciSectionNameLength) return false;
   if (value.startsWith('-') || value.startsWith('@')) return false;
@@ -55,10 +57,10 @@ bool isValidUciSectionName(String value) {
   return RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(value);
 }
 
-/// Mirrors `validator_interface` on the device.
+/// Bản sao của `validator_interface` trên thiết bị.
 ///
-/// Wider alphabet than a section name — `.` and `:` appear in VLAN and alias
-/// device names — but a much shorter limit.
+/// Bộ ký tự rộng hơn tên section — `.` và `:` xuất hiện trong tên VLAN và
+/// alias — nhưng giới hạn độ dài ngắn hơn nhiều.
 bool isValidInterfaceName(String value) {
   if (value.isEmpty || value.length > kMaxInterfaceNameLength) return false;
   if (value.startsWith('-') || value.contains('..')) return false;
@@ -82,7 +84,7 @@ void validateInterfaceName(String value) {
   }
 }
 
-/// Thrown for input that must never reach the device.
+/// Ném ra với đầu vào không bao giờ được phép tới thiết bị.
 class UciValidationException implements Exception {
   UciValidationException(this.message);
   final String message;
@@ -97,13 +99,13 @@ bool isValidIpv4(String value) {
     if (part.isEmpty || part.length > 3) return false;
     final n = int.tryParse(part);
     if (n == null || n < 0 || n > 255) return false;
-    // Reject "01" style octets, which some tools accept as octal.
+    // Chặn octet kiểu "01" vì một số công cụ hiểu thành số bát phân.
     if (part.length > 1 && part.startsWith('0')) return false;
   }
   return true;
 }
 
-/// A netmask must be contiguous ones followed by contiguous zeros.
+/// Netmask phải là một dãy bit 1 liền nhau rồi tới một dãy bit 0 liền nhau.
 bool isValidIpv4Netmask(String value) {
   if (!isValidIpv4(value)) return false;
   final octets = value.split('.').map(int.parse).toList();
@@ -112,13 +114,13 @@ bool isValidIpv4Netmask(String value) {
     bits = (bits << 8) | octet;
   }
   if (bits == 0) return true;
-  // ~bits + 1 is a power of two exactly when bits is a valid mask.
+  // ~bits + 1 là luỹ thừa của 2 đúng khi bits là một mask hợp lệ.
   final inverted = (~bits) & 0xFFFFFFFF;
   return (inverted & (inverted + 1)) == 0;
 }
 
-/// WPA passphrases are 8..63 characters; anything else is rejected by hostapd
-/// and would leave the radio down.
+/// Mật khẩu WPA dài 8..63 ký tự; ngoài khoảng đó hostapd từ chối và radio sẽ
+/// không lên. Chưa có tool ghi nào gọi tới.
 void validateWifiPassword(String password, String encryption) {
   if (encryption == 'none' || encryption == 'owe') return;
   if (password.length < 8 || password.length > 63) {

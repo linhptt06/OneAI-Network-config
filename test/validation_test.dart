@@ -68,8 +68,8 @@ void main() {
 
   group('encryption values the grammar constrains the model to', () {
     test('includes the cipher-pinned form vendor images store', () {
-      // The MediaTek image in use stores psk2+ccmp; without it in the list the
-      // grammar would force the model to downgrade to bare psk2.
+      // Firmware MediaTek đang dùng lưu psk2+ccmp; thiếu nó trong danh sách
+      // thì grammar ép model hạ xuống psk2 trơn.
       expect(kWifiEncryptionModes, contains('psk2+ccmp'));
       expect(kWifiEncryptionModes, contains('sae'));
     });

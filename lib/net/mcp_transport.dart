@@ -6,25 +6,24 @@ import 'package:dartssh2/dartssh2.dart';
 
 import 'agent_protocol.dart';
 
-/// Carries JSON-RPC requests to the MCP server running on the router.
+/// Chuyển yêu cầu JSON-RPC tới MCP server trên router.
 ///
-/// [send] takes a list rather than a single request because the server reads
-/// stdin in a loop: several requests ride one SSH exec channel and come back as
-/// one reply per line, in order. Opening a channel per request costs a round
-/// trip the router can ill afford.
+/// [send] nhận cả danh sách chứ không nhận từng yêu cầu, vì server đọc stdin
+/// theo vòng lặp: nhiều yêu cầu đi chung một kênh SSH exec và trả về mỗi dòng
+/// một phản hồi, đúng thứ tự. Mở kênh riêng cho từng yêu cầu tốn thêm round
+/// trip mà router khó chịu nổi.
 ///
-/// An interface rather than a concrete class so the client can be driven by a
-/// scripted fake in tests, and so a future ubus transport can be dropped in
-/// without touching the client.
+/// Để dạng interface để test cắm được transport giả, và sau này thêm transport
+/// ubus mà không phải sửa client.
 abstract class McpTransport {
   Future<List<Map<String, dynamic>>> send(List<Map<String, dynamic>> requests);
 }
 
-/// Runs `mcp_stdio_server` over the existing SSH connection.
+/// Chạy `mcp_stdio_server` qua kết nối SSH sẵn có.
 ///
-/// Nothing user- or model-supplied reaches the command line: the executable
-/// path is a constant and every parameter travels inside the JSON body on
-/// stdin, so quoting bugs cannot become command injection.
+/// Không gì do người dùng hay model cung cấp chạm tới dòng lệnh: đường dẫn
+/// thực thi là hằng số, mọi tham số đi trong thân JSON trên stdin, nên lỗi
+/// escape không thể thành command injection.
 class SshMcpTransport implements McpTransport {
   SshMcpTransport(
     this._client, {
@@ -34,8 +33,8 @@ class SshMcpTransport implements McpTransport {
 
   final SSHClient _client;
 
-  /// Where `make install` puts the server. The agent repo installs every tool
-  /// under `/usr/libexec/router-agent/`.
+  /// Nơi `make install` đặt server; repo agent cài mọi tool vào
+  /// `/usr/libexec/router-agent/`.
   final String serverPath;
 
   final Duration timeout;
@@ -55,16 +54,16 @@ class SshMcpTransport implements McpTransport {
       session.stderr.forEach(stderrBytes.add),
     ]);
 
-    // The server's read loop rejects any line that does not end in `\n`, so the
-    // terminator is part of the contract rather than cosmetic.
+    // Vòng đọc của server từ chối dòng không kết thúc bằng `\n`, nên ký tự
+    // xuống dòng là một phần hợp đồng chứ không phải cho đẹp.
     final payload = StringBuffer();
     for (final request in requests) {
       payload.write(jsonEncode(request));
       payload.write('\n');
     }
     session.stdin.add(Uint8List.fromList(utf8.encode(payload.toString())));
-    // The server reads until EOF, so stdin must be closed or both sides wait
-    // for each other until the timeout fires.
+    // Server đọc tới EOF, nên phải đóng stdin, nếu không hai bên chờ nhau tới
+    // khi hết timeout.
     await session.stdin.close();
 
     try {
@@ -81,9 +80,8 @@ class SshMcpTransport implements McpTransport {
     final stderr = utf8.decode(stderrBytes.takeBytes(), allowMalformed: true);
 
     if (stdout.trim().isEmpty) {
-      // A missing server surfaces here as empty stdout plus a shell error,
-      // which is worth naming explicitly: it is the expected state before the
-      // agent has been installed.
+      // Chưa cài agent thì hiện ra ở đây thành stdout rỗng kèm lỗi shell —
+      // đáng gọi tên rõ ràng vì đó là trạng thái bình thường lúc chưa cài.
       throw AgentProtocolException(
         stderr.contains('not found')
             ? 'Chưa cài agent trên thiết bị ($serverPath).'
@@ -96,12 +94,11 @@ class SshMcpTransport implements McpTransport {
   }
 }
 
-/// Splits the server's stdout into one decoded reply per line.
+/// Tách stdout của server thành mỗi dòng một phản hồi đã giải mã.
 ///
-/// Lines that are not JSON objects are skipped rather than fatal: a login
-/// banner or a busybox warning ahead of the payload is noise, not a protocol
-/// violation. Too few replies is fatal, because the caller pairs replies with
-/// requests by position.
+/// Dòng không phải object JSON thì bỏ qua chứ không coi là lỗi: banner đăng
+/// nhập hay cảnh báo busybox chỉ là nhiễu. Nhưng thiếu phản hồi là lỗi nặng,
+/// vì bên gọi ghép phản hồi với yêu cầu theo vị trí.
 List<Map<String, dynamic>> decodeJsonRpcLines(
   String stdout, {
   required int expected,
@@ -132,16 +129,15 @@ List<Map<String, dynamic>> decodeJsonRpcLines(
 String _truncate(String value, [int max = 400]) =>
     value.length <= max ? value : '${value.substring(0, max)}…';
 
-/// In-memory transport for tests, and for exercising the client without a
-/// router.
+/// Transport trong bộ nhớ, cho test và để chạy thử client khi không có router.
 class FakeMcpTransport implements McpTransport {
   FakeMcpTransport(this._handler);
 
-  /// Receives one request and returns the whole JSON-RPC envelope, so tests can
-  /// produce protocol errors and malformed replies as easily as successes.
+  /// Nhận một yêu cầu và trả về nguyên vỏ JSON-RPC, để test dựng lỗi giao thức
+  /// hay phản hồi hỏng dễ như dựng thành công.
   final Map<String, dynamic> Function(Map<String, dynamic> request) _handler;
 
-  /// Every request seen, in order, for assertions.
+  /// Mọi yêu cầu đã nhận, đúng thứ tự, để test kiểm chứng.
   final List<Map<String, dynamic>> requests = [];
 
   @override

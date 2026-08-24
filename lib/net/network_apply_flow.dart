@@ -1,8 +1,4 @@
-/// The small, testable policy around an approved LAN mutation.
-///
-/// This class deliberately has no SSH, database, UI, or LLM dependency. The
-/// caller supplies the two privileged operations, which keeps the rules that
-/// prevent an accidental apply directly testable.
+/// Kết quả của một lượt áp dụng thay đổi LAN, ở dạng model đọc được.
 class NetworkApplyOutcome {
   const NetworkApplyOutcome({required this.status, required this.message});
 
@@ -21,8 +17,14 @@ typedef ReconnectAndConfirmHealth =
       required int deadlineSeconds,
     });
 
-/// Applies only an approved static plan, then requires reconnect + health
-/// confirmation before reporting success. Tokens never appear in its result.
+/// Quy tắc nhỏ, dễ test, bao quanh một thay đổi LAN đã được duyệt.
+///
+/// Chỉ áp dụng kế hoạch tĩnh đã được duyệt, rồi bắt buộc kết nối lại và xác
+/// nhận sức khoẻ trước khi báo thành công. Token không bao giờ lọt vào kết quả.
+///
+/// Cố ý không phụ thuộc SSH, database, UI hay LLM: bên gọi truyền vào hai thao
+/// tác đặc quyền, nhờ vậy các quy tắc chặn apply ngoài ý muốn test được trực
+/// tiếp.
 Future<NetworkApplyOutcome> runApprovedNetworkApply({
   required bool applyEnabled,
   required bool approved,

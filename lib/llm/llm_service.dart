@@ -6,23 +6,19 @@ import 'package:llamadart/llamadart.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-/// Default model: small enough for a phone, and its chat template renders
-/// `<tool_call>` / `<tool_response>`, which is what makes tool calling work.
+/// Model mặc định: Qwen2.5-3B-Instruct Q4_K_M (~2 GB). Chat template của nó
+/// sinh `<tool_call>` / `<tool_response>` nên tool call mới chạy được.
 ///
-/// Repo and file name are case-sensitive. Hugging Face answers 401 (not 404)
-/// for a path that does not exist, so a typo here surfaces as an auth error.
-/// 1.5B rather than 3B: on a 4 GB emulator backed by a 7.7 GB host, the 3B
-/// model pushed the host into swapping and a single turn took ~10 minutes.
-/// The bottleneck was memory pressure, not model size as such — a phone with
-/// 8 GB runs 3B comfortably.
+/// Tên repo và file phân biệt hoa thường; gõ sai thì Hugging Face trả 401 chứ
+/// không phải 404.
+///
+/// Hợp với điện thoại 8 GB. Trên emulator 4 GB thì thiếu RAM, một lượt mất
+/// ~10 phút — dùng [kModel3bSmaller].
 const String kDefaultModelSource =
     'hf://Qwen/Qwen2.5-3B-Instruct-GGUF/qwen2.5-3b-instruct-q4_k_m.gguf';
 
-/// Alternatives, with measured file sizes.
-///
-/// On top of the file itself the runtime needs roughly 150 MB of KV cache at
-/// the current `contextSize: 4096`, so a 4 GB emulator with Android already
-/// resident fits the 1.5B model comfortably and the 3B one only barely.
+/// Các lựa chọn thay thế, kèm dung lượng đã đo. Khi tính RAM nhớ cộng thêm
+/// ~300 MB KV cache ở `contextSize: 8192`.
 const String kModel3b =
     'hf://Qwen/Qwen2.5-3B-Instruct-GGUF/qwen2.5-3b-instruct-q4_k_m.gguf'; // 2007 MB
 const String kModel3bSmaller =
@@ -30,17 +26,15 @@ const String kModel3bSmaller =
 
 enum LlmStatus { idle, downloading, loading, ready, error }
 
-/// Owns the [LlamaEngine] lifecycle: download, load, unload.
-///
-/// One engine is shared by every conversation; the conversation history lives
-/// in SQLite, not in the engine.
+/// Quản lý vòng đời [LlamaEngine]. Mọi hội thoại dùng chung một engine; lịch
+/// sử nằm trong SQLite chứ không trong engine.
 class LlmService extends ChangeNotifier {
   LlamaEngine? _engine;
 
   LlmStatus _status = LlmStatus.idle;
   LlmStatus get status => _status;
 
-  /// 0..1 while downloading, or null when the total size is unknown.
+  /// 0..1 khi đang tải, null khi chưa biết tổng dung lượng.
   double? _downloadProgress;
   double? get downloadProgress => _downloadProgress;
 
@@ -52,18 +46,14 @@ class LlmService extends ChangeNotifier {
 
   bool get isReady => _status == LlmStatus.ready && _engine != null;
 
-  /// Whether a turn is currently using the engine.
-  ///
-  /// llama.cpp allows exactly one generation at a time. Guarding only in the
-  /// UI is not enough: each chat screen builds its own controller, so a hot
-  /// reload or a reopened screen can produce a second controller that believes
-  /// the engine is idle. The lock therefore lives with the engine itself.
+  /// llama.cpp chỉ sinh được một luồng tại một thời điểm. Khoá đặt ở engine
+  /// chứ không ở UI, vì hot reload hay mở lại màn hình sẽ tạo controller thứ
+  /// hai tưởng engine đang rảnh.
   bool _turnInProgress = false;
   bool get turnInProgress => _turnInProgress;
 
-  /// Claims the engine for one turn. Returns false if a turn is already
-  /// running, so the caller can refuse cleanly instead of letting llama.cpp
-  /// raise "generation is already in progress".
+  /// Giành engine cho một lượt. False nếu đã có lượt đang chạy, để bên gọi từ
+  /// chối gọn thay vì để llama.cpp ném lỗi.
   bool beginTurn() {
     if (_turnInProgress) return false;
     _turnInProgress = true;
@@ -82,10 +72,8 @@ class LlmService extends ChangeNotifier {
     return engine;
   }
 
-  /// Downloads (if needed) and loads the model.
-  ///
-  /// On Android there is no implicit shared model cache, so the cache directory
-  /// is pinned to app-private storage.
+  /// Tải model (nếu cần) rồi nạp. Android không có cache dùng chung nên thư
+  /// mục cache ghim vào vùng riêng của app.
   Future<void> load({String? source}) async {
     if (_status == LlmStatus.downloading || _status == LlmStatus.loading) {
       return;
@@ -94,8 +82,8 @@ class LlmService extends ChangeNotifier {
     _modelSource = source ?? _modelSource;
     _errorMessage = null;
     _downloadProgress = null;
-    // Starts as `loading`: a cached model never reports progress, so the
-    // downloading state is entered only if a download actually begins.
+    // Model đã cache không báo tiến độ, nên chỉ vào trạng thái downloading
+    // khi thực sự có tải về.
     _setStatus(LlmStatus.loading);
 
     try {
@@ -114,8 +102,7 @@ class LlmService extends ChangeNotifier {
         options: ModelLoadOptions(cacheDirectory: cacheDir),
         onProgress: (progress) {
           _downloadProgress = progress.fraction;
-          // Back to `loading` once the bytes are down and llama.cpp starts
-          // mapping the model, which is itself slow on a phone.
+          // Tải xong thì về `loading`: bước map model cũng chậm.
           _status = (progress.fraction ?? 0) >= 1.0
               ? LlmStatus.loading
               : LlmStatus.downloading;
@@ -146,30 +133,28 @@ class LlmService extends ChangeNotifier {
 }
 
 // ---------------------------------------------------------------------------
-// Turn events
+// Sự kiện trong một lượt
 // ---------------------------------------------------------------------------
 
-/// One observable step of a chat turn.
-///
-/// A single user prompt can produce several of these: prose, then a tool call,
-/// then more prose after the tool result is fed back.
+/// Một bước quan sát được của lượt chat. Một câu hỏi có thể sinh nhiều bước:
+/// văn bản, tool call, rồi văn bản tiếp.
 sealed class TurnEvent {
   const TurnEvent();
 }
 
-/// A fragment of assistant prose.
+/// Một mảnh văn bản của trợ lý.
 class TextDelta extends TurnEvent {
   final String text;
   const TextDelta(this.text);
 }
 
-/// A fragment of model reasoning, for models that expose it.
+/// Một mảnh suy luận, với model có phát ra phần này.
 class ThinkingDelta extends TurnEvent {
   final String text;
   const ThinkingDelta(this.text);
 }
 
-/// The model asked to run a tool.
+/// Model yêu cầu chạy tool.
 class ToolCallRequested extends TurnEvent {
   final String id;
   final String name;
@@ -181,7 +166,7 @@ class ToolCallRequested extends TurnEvent {
   });
 }
 
-/// A tool finished; [result] is the JSON-encoded payload sent back to the model.
+/// Tool chạy xong; [result] là payload JSON gửi lại cho model.
 class ToolCallCompleted extends TurnEvent {
   final String id;
   final String name;
@@ -195,13 +180,13 @@ class ToolCallCompleted extends TurnEvent {
   });
 }
 
-/// The assistant produced a complete prose message (one round of the loop).
+/// Trợ lý sinh xong một tin nhắn hoàn chỉnh.
 class AssistantMessageCompleted extends TurnEvent {
   final String text;
   final String? reasoning;
 
-  /// False only for prose emitted alongside a tool call. Callers need this to
-  /// avoid presenting a model preamble as a completed, grounded answer.
+  /// False khi văn bản đi kèm tool call — đó là lời dạo đầu, chưa phải câu
+  /// trả lời có căn cứ.
   final bool isFinal;
 
   const AssistantMessageCompleted(
@@ -212,10 +197,10 @@ class AssistantMessageCompleted extends TurnEvent {
 }
 
 // ---------------------------------------------------------------------------
-// Tool-call loop
+// Vòng lặp gọi tool
 // ---------------------------------------------------------------------------
 
-/// Accumulates streamed tool-call fragments into whole calls.
+/// Gom các mảnh tool call theo luồng thành lời gọi hoàn chỉnh.
 class _ToolCallBuilder {
   String? id;
   String? name;
@@ -232,31 +217,7 @@ class _ToolCallBuilder {
   }
 }
 
-/// Runs one chat turn to completion, executing tools as the model requests them.
-///
-/// [messages] is the replayed history; it is appended to in place as the turn
-/// progresses so each follow-up request sees the tool calls and results from
-/// earlier rounds. Callers persist from the emitted events, not from this list.
-/// The loop stops when the model answers without asking for a tool, or after
-/// [maxToolRounds] rounds — the bound guards against a model that keeps
-/// re-requesting the same tool forever.
-///
-/// Two tool lists, deliberately:
-///
-/// - [tools] is the whole catalogue, and it is what a requested name is looked
-///   up in. A tool that was not offered this round still runs if the model asks
-///   for it, so it can answer with its own `hint` and `valid_values` instead of
-///   a bare "no such tool".
-/// - [provideTools] returns the subset whose schemas go into the prompt, and is
-///   called again at the start of *every* round rather than once per turn:
-///   `connect_device` runs inside a turn, so the round after it must be able to
-///   offer the read tools it just unlocked. Defaults to the whole catalogue.
-///
-/// Changing the offered set mid-turn invalidates the prompt prefix and makes
-/// llama.cpp prefill again, which is the largest cost on a phone. It is paid
-/// only on connect and disconnect — a few times per session — so it amortises.
-/// If measurement says otherwise, freeze the set for the whole turn and accept
-/// that connect + read takes two turns.
+/// Tham số sinh cho một lượt. `temp: 0` giữ tham số tool lặp lại được.
 const GenerationParams kTurnParams = GenerationParams(
   maxTokens: 768,
   temp: 0.0,
@@ -265,16 +226,17 @@ const GenerationParams kTurnParams = GenerationParams(
   penalty: 1.0,
 );
 
+/// Độ dài tối đa của kết quả tool khi phát lại vào prompt. Router nhiều
+/// interface có thể trả về dài hơn cả câu trả lời, chiếm chỗ của schema tool.
+/// UI vẫn hiện đầy đủ; chỉ bản model đọc lại mới bị cắt.
 const int kMaxToolResultChars = 1500;
 String truncateToolResult(String result) => result.length <= kMaxToolResultChars
     ? result
     : '${result.substring(0, kMaxToolResultChars)}'
           '… [đã cắt bớt — gọi lại công cụ nếu cần đầy đủ]';
 
-/// The tool set and choice for one model round.
-///
-/// A required call is limited to one definition. ToolChoice.required then
-/// becomes a grammar-level constraint rather than a hope expressed in prose.
+/// Bộ tool và cách chọn tool cho một vòng. Khi bắt buộc gọi, danh sách rút
+/// còn một định nghĩa để ToolChoice.required thành ràng buộc grammar thật sự.
 class ToolRoundPlan {
   const ToolRoundPlan({required this.tools, required this.toolChoice});
 
@@ -282,11 +244,9 @@ class ToolRoundPlan {
   final ToolChoice toolChoice;
 }
 
-/// Narrows one round to [requiredToolName] until that tool has been called.
-///
-/// The policy remains inert when the connected router does not advertise the
-/// tool. In that case the caller can return a truthful not-supported result
-/// instead of inventing success.
+/// Thu hẹp một vòng về đúng [requiredToolName] cho tới khi tool đó được gọi.
+/// Tự vô hiệu nếu router không khai báo tool, để bên gọi báo "không hỗ trợ"
+/// thay vì bịa thành công.
 ToolRoundPlan planToolRound({
   required List<ToolDefinition>? offered,
   required String? requiredToolName,
@@ -307,6 +267,17 @@ ToolRoundPlan planToolRound({
   return ToolRoundPlan(tools: offered, toolChoice: ToolChoice.auto);
 }
 
+/// Chạy trọn một lượt chat, gọi tool mỗi khi model yêu cầu.
+///
+/// [messages] là lịch sử phát lại, được nối thêm tại chỗ. Bên gọi lưu trữ từ
+/// các sự kiện phát ra, không phải từ danh sách này. Dừng khi model trả lời mà
+/// không xin tool, hoặc sau [maxToolRounds] vòng.
+///
+/// Hai danh sách tool, cố ý tách:
+/// - [tools]: toàn bộ catalogue, dùng để tra tên. Tool không đưa ra ở vòng này
+///   vẫn chạy nếu model đòi, để nó trả lời bằng `hint` của chính nó.
+/// - [provideTools]: tập con đưa vào prompt, gọi lại mỗi vòng vì
+///   `connect_device` chạy giữa lượt và mở khoá thêm tool đọc.
 Stream<TurnEvent> runChatTurn({
   required LlmService llm,
   required List<LlamaChatMessage> messages,
@@ -322,10 +293,8 @@ Stream<TurnEvent> runChatTurn({
     );
   }
   try {
-    // `llm.engine` throws when the model is not ready. Reading it inside the
-    // try is what guarantees the lock is released: evaluated before it, a
-    // throw here would skip the finally and wedge the engine for the rest of
-    // the session, silently swallowing every later message.
+    // Đọc `llm.engine` bên trong try: nếu đặt trước try, lỗi "model chưa sẵn
+    // sàng" sẽ bỏ qua finally và kẹt engine suốt phiên.
     yield* _runChatTurnLocked(
       engine: llm.engine,
       messages: messages,
@@ -336,8 +305,8 @@ Stream<TurnEvent> runChatTurn({
       maxToolRounds: maxToolRounds,
     );
   } finally {
-    // Released even when the stream is cancelled mid-generation, otherwise a
-    // single abandoned turn would wedge the engine for the rest of the session.
+    // Nhả cả khi stream bị huỷ giữa chừng, nếu không một lượt bỏ dở là kẹt
+    // engine suốt phiên.
     llm.endTurn();
   }
 }
@@ -357,13 +326,10 @@ Stream<TurnEvent> _runChatTurnLocked({
     final thinking = StringBuffer();
     final builders = <int, _ToolCallBuilder>{};
 
-    // Past the round budget, stop offering tools so the model is forced to
-    // answer with what it already has instead of looping again.
+    // Hết hạn mức vòng thì ngừng đưa tool, ép model trả lời bằng cái đã có.
     final offerTools = round < maxToolRounds;
 
-    // Asked again every round, not once per turn: a tool called in this turn
-    // can change what is available for the next round — connecting to a device
-    // is exactly that.
+    // Hỏi lại mỗi vòng: kết nối thiết bị giữa lượt làm đổi danh sách tool.
     final offered = offerTools ? provideTools() : null;
     final roundPlan = planToolRound(
       offered: offered,
@@ -400,7 +366,7 @@ Stream<TurnEvent> _runChatTurnLocked({
 
     final reasoning = thinking.isEmpty ? null : thinking.toString();
 
-    // No tool requested — the turn is over.
+    // Không xin tool nào — lượt kết thúc.
     if (builders.isEmpty) {
       yield AssistantMessageCompleted(
         text.toString(),
@@ -416,7 +382,7 @@ Stream<TurnEvent> _runChatTurnLocked({
       return;
     }
 
-    // Any prose that came alongside the tool call is still worth showing.
+    // Văn bản đi kèm tool call vẫn đáng hiện.
     if (text.isNotEmpty) {
       yield AssistantMessageCompleted(
         text.toString(),
@@ -450,10 +416,8 @@ Stream<TurnEvent> _runChatTurnLocked({
 
       String result;
       var failed = false;
-      // Looked up in the whole catalogue, not in what was offered this round.
-      // Offering less is a token saving; refusing a call the model still
-      // remembers from earlier in the conversation gains nothing, and costs the
-      // tool's own hint — which is the thing that tells the model to stop.
+      // Tra trong toàn bộ catalogue, không phải danh sách của vòng này. Từ
+      // chối lời gọi mà model còn nhớ thì mất luôn hint — thứ bảo nó dừng.
       final tool = tools.where((t) => t.name == name).firstOrNull;
       if (tool == null) {
         failed = true;
@@ -462,8 +426,8 @@ Stream<TurnEvent> _runChatTurnLocked({
         try {
           result = jsonEncode(await tool.invoke(arguments));
         } catch (error) {
-          // Reported back to the model as data: it can then apologise or retry
-          // with different arguments instead of the turn failing outright.
+          // Trả về dạng dữ liệu để model thử lại với tham số khác, thay vì
+          // hỏng cả lượt.
           failed = true;
           result = jsonEncode({'error': error.toString()});
         }

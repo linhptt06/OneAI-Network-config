@@ -4,7 +4,7 @@ import 'package:dartssh2/dartssh2.dart';
 
 import 'device_profile.dart';
 
-/// Result of one remote command.
+/// Kết quả của một lệnh chạy từ xa.
 class CommandResult {
   const CommandResult({
     required this.command,
@@ -28,14 +28,14 @@ class OpenWrtException implements Exception {
   String toString() => message;
 }
 
-/// An authenticated SSH connection to one OpenWrt device.
+/// Một kết nối SSH đã xác thực tới một thiết bị OpenWrt.
 ///
-/// This is all that is left on the app side of talking to a router: open the
-/// connection, hand out the client, close it. Nothing here knows what a
-/// command means — the agent on the device owns that.
+/// Đây là tất cả những gì còn lại ở phía app khi nói chuyện với router: mở kết
+/// nối, đưa client ra, đóng lại. Không chỗ nào ở đây hiểu một lệnh nghĩa là gì
+/// — đó là việc của agent trên thiết bị.
 ///
-/// [run] survives for the two cases the agent cannot cover itself: installing
-/// the agent in the first place, and diagnosing a device where it is missing.
+/// [run] còn tồn tại cho hai việc agent không tự lo được: cài chính agent, và
+/// chẩn đoán thiết bị chưa có nó.
 class OpenWrtSession {
   OpenWrtSession._(this._client, this.device);
 
@@ -44,7 +44,7 @@ class OpenWrtSession {
 
   bool get isClosed => _client.isClosed;
 
-  /// The SSH client, which [SshMcpTransport] rides on.
+  /// Client SSH mà [SshMcpTransport] chạy trên đó.
   SSHClient get client => _client;
 
   static Future<OpenWrtSession> connect(
@@ -61,19 +61,19 @@ class OpenWrtSession {
       socket,
       username: device.username,
       onPasswordRequest: () => password,
-      // Routers on a lab LAN are reached by IP with no known host key. The
-      // trade-off is accepted deliberately: this is a LAN admin tool, not a
-      // client for hosts on the open internet.
+      // Router trong LAN được truy cập bằng IP, không có host key biết trước.
+      // Chấp nhận đánh đổi có chủ ý: đây là công cụ quản trị LAN, không phải
+      // client cho máy chủ trên Internet.
       disableHostkeyVerification: true,
     );
     await client.authenticated;
     return OpenWrtSession._(client, device);
   }
 
-  /// Runs a raw shell command.
+  /// Chạy lệnh shell thô.
   ///
-  /// Reserved for bootstrap and diagnostics. Normal operation goes through the
-  /// agent, where parameters travel as typed JSON and never reach a shell.
+  /// Chỉ dành cho việc cài đặt ban đầu và chẩn đoán. Hoạt động bình thường đi
+  /// qua agent, nơi tham số là JSON có kiểu và không bao giờ chạm shell.
   Future<CommandResult> run(String command) async {
     if (_client.isClosed) {
       throw OpenWrtException('Mất kết nối SSH tới ${device.alias}.');
@@ -93,7 +93,7 @@ class OpenWrtSession {
   }
 }
 
-/// Opens a session for [alias], resolving its stored password.
+/// Mở phiên cho [alias], tự tra mật khẩu đã lưu.
 Future<OpenWrtSession> connectByAlias(DeviceStore store, String alias) async {
   final devices = await store.list();
   final resolvedAlias = resolveDeviceAlias(

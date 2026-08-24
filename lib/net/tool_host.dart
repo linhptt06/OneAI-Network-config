@@ -6,7 +6,7 @@ import 'mcp_transport.dart';
 import 'network_apply_flow.dart';
 import 'openwrt_session.dart';
 
-/// What the user is being asked to approve.
+/// Nội dung người dùng được hỏi để duyệt.
 class ConfirmRequest {
   const ConfirmRequest({
     required this.deviceAlias,
@@ -17,38 +17,37 @@ class ConfirmRequest {
 
   final String deviceAlias;
 
-  /// One line describing the intent, e.g. "Đổi tên WiFi thành NhaToi_5G".
+  /// Một dòng mô tả ý định, ví dụ "Đổi địa chỉ IP LAN thành 192.168.2.1".
   final String summary;
 
-  /// Verbatim diff reported by the agent — the device's own account of what is
-  /// staged. Shown instead of a reconstructed command string so the dialog
-  /// cannot drift from what will actually be committed.
+  /// Thay đổi đã staging, mỗi field một dòng `trước → sau`. Giá trị lấy từ
+  /// diff agent báo về cho kế hoạch này nên hộp thoại không lệch khỏi thứ sẽ
+  /// thật sự được ghi; chỉ nhãn field là của app.
   final String pendingChanges;
 
-  /// Set for changes that can cut off access to the device.
+  /// Chỉ đặt cho thay đổi có thể làm mất kết nối tới thiết bị.
   final String? warning;
 }
 
 typedef ConfirmCallback = Future<bool> Function(ConfirmRequest request);
 
-/// Shared, mutable state the network tools operate on.
+/// Trạng thái dùng chung, có thể thay đổi, mà các tool mạng thao tác lên.
 ///
-/// Holds the SSH connection, the agent client riding on it, and the callback
-/// that asks the user to approve a change. The tool *catalogue* is built once at
-/// startup, but two things about a tool cannot be: the confirmation callback
-/// belongs to whichever screen is on top, and which tools are worth offering
-/// depends on what is connected right now — see [deviceToolNames].
+/// Giữ kết nối SSH, client agent chạy trên đó, và callback hỏi người dùng
+/// duyệt thay đổi. Catalogue tool dựng một lần lúc khởi động, nhưng hai thứ
+/// thì không: callback xác nhận thuộc về màn hình đang ở trên cùng, và danh
+/// sách tool đáng đưa ra phụ thuộc thiết bị đang kết nối.
 class ToolHost {
-  /// This is deliberately not a model-controlled setting. The app turns it on
-  /// only after it owns apply, reconnect, and health confirmation end to end.
+  /// Cố ý không phải thiết lập do model điều khiển. App chỉ bật khi tự lo được
+  /// trọn vẹn apply, kết nối lại và xác nhận sức khoẻ.
   ToolHost({this.networkApplyEnabled = false});
 
   OpenWrtSession? _session;
   McpClient? _client;
   String? _alias;
 
-  /// Set by the chat screen; defaults to refusing, so a write can never slip
-  /// through when no UI is listening.
+  /// Do màn hình chat gán; mặc định là từ chối, để không lệnh ghi nào lọt qua
+  /// khi không có UI nào đang lắng nghe.
   ConfirmCallback confirm = (_) async => false;
 
   final bool networkApplyEnabled;
@@ -58,28 +57,27 @@ class ToolHost {
 
   McpClient? get client => _client;
 
-  /// Whether a live agent session exists right now.
+  /// Hiện có phiên agent nào đang sống hay không.
   bool get isConnected => _client != null && !(_session?.isClosed ?? true);
 
-  /// Tool names the connected device declared for itself. Empty when nothing is
-  /// connected.
+  /// Tên các tool thiết bị đang kết nối tự khai. Rỗng khi chưa kết nối.
   ///
-  /// This is what narrows the prompt to the tools that can actually run
-  /// (`toolsFor` in `net_tools.dart`). It uses the same liveness check as
-  /// [requireClient] on purpose: after the SSH session drops, the last device's
-  /// list must not keep read tools in the prompt that can now only fail.
+  /// Đây là thứ thu hẹp prompt về những tool thật sự chạy được. Cố ý dùng cùng
+  /// phép kiểm tra liveness với [requireClient]: sau khi phiên SSH rớt, danh
+  /// sách của thiết bị cũ không được giữ lại tool nay chỉ có thể lỗi.
   ///
-  /// Names only — never descriptions. Same trust boundary as [McpServerInfo].
+  /// Chỉ tên, không bao giờ có mô tả — cùng ranh giới tin cậy với
+  /// [McpServerInfo].
   Set<String> get deviceToolNames => isConnected
       ? _client!.server?.toolNames ?? const <String>{}
       : const <String>{};
 
-  /// Alias of the connected device, for confirmation dialogs.
+  /// Bí danh thiết bị đang kết nối, dùng cho hộp thoại xác nhận.
   String get deviceAlias => _alias ?? 'thiết bị';
 
   String? get connectedDeviceAlias => isConnected ? _alias : null;
 
-  /// The connected agent, or an error telling the model what to do first.
+  /// Agent đang kết nối, hoặc lỗi chỉ cho model biết phải làm gì trước.
   McpClient requireClient() {
     if (_networkChangeInProgress) {
       throw OpenWrtException(
@@ -109,11 +107,11 @@ class ToolHost {
     _alias = null;
   }
 
-  /// Applies a *previously approved* static LAN preview, reconnects to the new
-  /// address, and finalises the router-side rollback guard.
+  /// Áp dụng bản xem trước LAN tĩnh *đã được duyệt*, kết nối lại tại địa chỉ
+  /// mới, rồi chốt rollback guard trên router.
   ///
-  /// Neither [planToken] nor the health token returned by the agent ever leave
-  /// this method. In particular, the LLM sees only [NetworkApplyOutcome].
+  /// Cả [planToken] lẫn health token đều không rời khỏi hàm này. LLM chỉ thấy
+  /// [NetworkApplyOutcome].
   Future<NetworkApplyOutcome> applyApprovedStaticLanChange({
     required DeviceStore deviceStore,
     required String planToken,
@@ -183,8 +181,8 @@ class ToolHost {
     required String healthToken,
     required int deadlineSeconds,
   }) async {
-    // The old address is expected to disappear after apply. Closing it also
-    // prevents a later read from racing the reconnect + health-confirm flow.
+    // Địa chỉ cũ dự kiến biến mất sau khi apply. Đóng nó cũng ngăn một lệnh
+    // đọc sau đó tranh chấp với luồng kết nối lại và xác nhận sức khoẻ.
     await disconnect();
     final deadline = DateTime.fromMillisecondsSinceEpoch(
       deadlineSeconds * Duration.millisecondsPerSecond,
@@ -208,8 +206,8 @@ class ToolHost {
           );
         }
 
-        // A live MCP session plus a read of LAN proves the new address is
-        // serving this router before the rollback guard is finalised.
+        // Một phiên MCP sống cộng với một lần đọc LAN chứng minh địa chỉ mới
+        // đúng là router này, trước khi chốt rollback guard.
         final lan = await replacementClient.callTool('network_get', {
           'interface': 'lan',
         });

@@ -2,10 +2,10 @@ import '../net/device_profile.dart';
 import '../net/tool_host.dart';
 import 'net_tools.dart';
 
-/// Produces the small, non-secret router context replayed on every turn.
+/// Dựng phần ngữ cảnh router nhỏ, không chứa bí mật, phát lại ở mọi lượt.
 ///
-/// It deliberately contains aliases and capability names only: never hosts,
-/// usernames, passwords, SSH credentials, confirmation tokens or tool output.
+/// Cố ý chỉ có bí danh và tên capability: không có host, tài khoản, mật khẩu,
+/// token xác nhận hay kết quả tool.
 Future<Map<String, Object?>> buildRouterState({
   required DeviceStore deviceStore,
   required ToolHost toolHost,
@@ -21,7 +21,7 @@ Future<Map<String, Object?>> buildRouterState({
   );
 }
 
-/// Pure form used by tests; callers pass aliases only, never device profiles.
+/// Dạng thuần cho test; bên gọi chỉ truyền bí danh, không truyền hồ sơ.
 Map<String, Object?> routerStateFor({
   required List<String> aliases,
   required String? connectedDeviceAlias,

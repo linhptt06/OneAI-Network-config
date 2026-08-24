@@ -1,7 +1,7 @@
-/// Shared errors raised while talking to the router's MCP agent.
+/// Các lỗi dùng chung khi giao tiếp với agent MCP trên router.
 library;
 
-/// Raised when a router reply does not satisfy the expected protocol.
+/// Ném ra khi phản hồi của router không đúng giao thức.
 class AgentProtocolException implements Exception {
   AgentProtocolException(this.message, {this.rawResponse});
 
@@ -13,7 +13,7 @@ class AgentProtocolException implements Exception {
       rawResponse == null ? message : '$message\nPhản hồi thô: $rawResponse';
 }
 
-/// Raised when the router returns a tool-level error.
+/// Ném ra khi router trả về lỗi ở mức tool.
 class AgentErrorException implements Exception {
   AgentErrorException(this.code, this.message);
 
@@ -24,7 +24,7 @@ class AgentErrorException implements Exception {
   String toString() => '[$code] $message';
 }
 
-/// The current router does not advertise the requested tool.
+/// Router hiện tại không khai báo tool được yêu cầu.
 const String kUnsupportedToolCode = 'unsupported_tool';
 
 bool isUnsupportedTool(String code) => code == kUnsupportedToolCode;

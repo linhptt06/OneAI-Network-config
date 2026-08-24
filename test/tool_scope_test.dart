@@ -11,16 +11,15 @@ void main() {
     test('offers only local tools before anything is connected', () {
       // Read tools here could do nothing but throw "Chưa kết nối tới thiết bị
       // nào", so their schemas would cost context on every turn for a round the
-      // model cannot win.
+      // model không thể thắng.
       final offered = toolsFor(realCatalogue(), const {});
 
       expect(namesOf(offered), {'list_devices', 'connect_device'});
     });
 
     test('drops read tools the connected device does not declare', () {
-      // This router has no wireless section support; wifi_get therefore never
-      // reaches the prompt instead of being called and answered with
-      // unsupported_tool.
+      // Router này không hỗ trợ section wireless, nên wifi_get không bao giờ
+      // vào tới prompt, thay vì bị gọi rồi nhận unsupported_tool.
       final offered = toolsFor(realCatalogue(), const {
         'network_get',
         'route_info',
@@ -35,9 +34,9 @@ void main() {
     });
 
     test('keeps connect_device in both states', () {
-      // The trap this function exists to avoid: the router never declares the
-      // tools that run on the phone, so filtering the catalogue as a whole
-      // would remove the only way to connect — with no way back.
+      // Cái bẫy mà hàm này sinh ra để tránh: router không bao giờ khai các
+      // tool chạy trên điện thoại, nên lọc cả catalogue sẽ mất luôn đường kết
+      // nối, và không có đường quay lại.
       for (final declared in [
         const <String>{},
         const {'network_get'},
@@ -52,8 +51,8 @@ void main() {
     });
 
     test('ignores names the app has no definition for', () {
-      // Same boundary as negotiateTools: a device naming something this build
-      // never wrote a description for cannot add a tool to the prompt.
+      // Cùng ranh giới với negotiateTools: thiết bị khai một cái tên mà bản
+      // build này chưa viết mô tả thì không thêm được tool vào prompt.
       final offered = toolsFor(realCatalogue(), const {
         'wifi_get',
         'exfiltrate_password',
@@ -95,16 +94,16 @@ void main() {
   });
 
   group('every tool name the model reads is a tool that exists', () {
-    // The invariant that a redaction placeholder broke: it named `get_wifi_info`
-    // for months, and a test asserting `contains('get_wifi_info')` guarded the
-    // typo instead of the contract. Any string the model reads can drift the same
-    // way — the compiler checks none of them — so the check has to ask the
-    // catalogue rather than repeat a literal.
+    // Bất biến từng bị phá: một chỗ giữ chỗ gọi nhầm `get_wifi_info` suốt
+    // nhiều tháng, và test khẳng định `contains('get_wifi_info')` lại canh
+    // đúng cái lỗi chính tả đó. Mọi chuỗi model đọc đều có thể trôi như vậy vì
+    // compiler không kiểm chuỗi nào, nên phép kiểm phải hỏi catalogue chứ
+    // không lặp lại một literal.
 
     test('the system prompt', () {
-      // kSystemPrompt maps questions to tools by name (rules 2-5). Renaming a
-      // tool without editing it here would leave the model with instructions to
-      // call something that no longer answers.
+      // kSystemPrompt gọi tool theo tên ở các quy tắc 2, 4 và 6-8. Đổi tên
+      // tool mà quên sửa ở đó là để lại cho model chỉ dẫn gọi một thứ không
+      // còn trả lời.
       expect(
         toolNamesMentionedIn(
           kSystemPrompt,
@@ -114,8 +113,8 @@ void main() {
     });
 
     test('tool and parameter descriptions', () {
-      // connect_device's parameter says "lấy từ list_devices"; that cross
-      // reference is only useful while the name is real.
+      // Tham số của connect_device ghi "lấy từ list_devices"; tham chiếu chéo
+      // đó chỉ có ích khi cái tên còn thật.
       final prose = realCatalogue()
           .expand(
             (tool) => [
@@ -132,8 +131,8 @@ void main() {
     });
 
     test('the check can actually fail', () {
-      // Guards the regex itself: a pattern that matched nothing would make both
-      // tests above pass no matter how wrong the prose got.
+      // Canh chính cái regex: một mẫu không khớp gì sẽ khiến hai test trên
+      // luôn xanh dù lời văn có sai đến đâu.
       expect(toolNamesMentionedIn('gọi lại get_wifi_info để đọc'), {
         'get_wifi_info',
       });
@@ -200,8 +199,8 @@ void main() {
 
   group('ToolHost reports the device tool names', () {
     test('a fresh host declares nothing', () {
-      // What makes the "not connected" case above the real startup state:
-      // main.dart builds the catalogue before any device is known.
+      // Vì sao trường hợp "chưa kết nối" ở trên đúng là trạng thái khởi động:
+      // main.dart dựng catalogue trước khi biết thiết bị nào.
       expect(ToolHost().deviceToolNames, isEmpty);
       expect(ToolHost().isConnected, isFalse);
     });

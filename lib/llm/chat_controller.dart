@@ -11,9 +11,8 @@ import 'llm_service.dart';
 import 'net_tools.dart';
 import 'router_state.dart';
 
-/// The "act, do not announce" rule exists because a 1.5B model tends to reply
-/// "Đang kiểm tra..." and stop, instead of emitting the call. Stating the
-/// failure mode as a forbidden behaviour is what suppresses it.
+/// Quy tắc "làm ngay, đừng thông báo" có vì model nhỏ hay trả lời "Đang kiểm
+/// tra..." rồi dừng thay vì gọi tool. Cấm thẳng hành vi đó mới dập được.
 const String kSystemPrompt =
     'Bạn là trợ lý quản trị router OpenWrt. Trả lời tiếng Việt tự nhiên, '
     'ngắn gọn, đúng trọng tâm. Người dùng không cần biết tên công cụ, JSON '
@@ -75,12 +74,10 @@ class StaticLanCommand {
   final String netmask;
 }
 
-/// Parses an unambiguous static LAN command. A fully specified IP/netmask
-/// request defaults to LAN because this app's mutation tool is LAN-only; an
-/// explicit WAN request is left for a clarification instead. A model is still
-/// useful for ordinary router questions, but a small local model cannot
-/// reliably honour a mandatory function-call grammar. For this high-risk
-/// command, dispatching from explicit user input is safer and deterministic.
+/// Bóc lệnh đổi IP LAN tĩnh khi câu lệnh đã rõ ràng. Có đủ IP và netmask thì
+/// mặc định là LAN, vì tool ghi của app chỉ làm được LAN; nói rõ WAN thì để
+/// hỏi lại. Với lệnh rủi ro cao này, bóc trực tiếp từ câu người dùng an toàn
+/// và tất định hơn là trông chờ model tuân thủ grammar.
 StaticLanCommand? parseExplicitStaticLanCommand(String prompt) {
   final value = prompt.toLowerCase();
   if (!_isLanChangeRequest(value)) return null;
@@ -103,10 +100,9 @@ bool _isLanChangeRequest(String value) {
   return wantsChange && !RegExp(r'\bwan(?:6)?\b').hasMatch(value);
 }
 
-/// Returns an app-owned clarification for a LAN change that contains an IP
-/// but not enough trustworthy data to invoke the preview tool. Letting this
-/// fall through to the model used to allow an ungrounded "đã tạo bản xem
-/// trước" reply, even though no tool call (and therefore no dialog) occurred.
+/// Câu hỏi lại do app tự sinh, cho yêu cầu đổi LAN có IP nhưng thiếu dữ liệu
+/// đáng tin để gọi tool preview. Thả cho model xử lý thì nó từng trả lời "đã
+/// tạo bản xem trước" dù không có tool call nào, và do đó không có hộp thoại.
 String? staticLanPreviewClarification(String prompt) {
   final value = prompt.toLowerCase();
   if (!_isLanChangeRequest(value) ||
@@ -132,8 +128,8 @@ String? staticLanPreviewClarification(String prompt) {
   return null;
 }
 
-/// A chat message is never a confirmation for a network transaction. The
-/// native dialog owns that boundary and blocks input while it is visible.
+/// Tin nhắn chat không bao giờ là xác nhận cho một giao dịch mạng. Chỉ hộp
+/// thoại của hệ thống mới giữ ranh giới đó.
 bool isBareChatConfirmation(String prompt) {
   switch (prompt.trim().toLowerCase()) {
     case 'xác nhận':
@@ -146,9 +142,8 @@ bool isBareChatConfirmation(String prompt) {
   }
 }
 
-/// Capability discovery already ran while connecting. Asking which tools are
-/// available is a local question; sending it to the model used to make it call
-/// network_get and then invent a LAN summary.
+/// Danh sách capability đã lấy lúc kết nối, nên đây là câu hỏi cục bộ. Đưa
+/// cho model thì nó từng gọi network_get rồi bịa ra một bản tóm tắt LAN.
 bool isSupportedToolsRequest(String prompt) {
   final value = prompt.toLowerCase();
   final mentionsTools = value.contains('tool') || value.contains('công cụ');
@@ -178,9 +173,8 @@ String supportedToolsCompletionText({
   return 'Router $deviceAlias hỗ trợ ${names.length} tool: ${names.join(', ')}.';
 }
 
-/// True only when the user supplied enough information for a static LAN
-/// change. Incomplete requests must stay conversational so the model can ask
-/// its one missing question instead of being forced into an invalid preview.
+/// Chỉ true khi người dùng đã cho đủ thông tin đổi IP LAN tĩnh. Yêu cầu còn
+/// thiếu phải để model hỏi lại, đừng ép nó tạo preview không hợp lệ.
 bool requiresExplicitLanPreview(String prompt) {
   return parseExplicitStaticLanCommand(prompt) != null;
 }
@@ -190,13 +184,13 @@ String? _toolStatus(String result) {
     final decoded = jsonDecode(result);
     if (decoded is Map) return decoded['status']?.toString();
   } on FormatException {
-    // Tool failures are represented below as a safe non-success result.
+    // Tool lỗi sẽ được xử lý bên dưới thành kết quả không-thành-công an toàn.
   }
   return null;
 }
 
-/// Creates the connection reply from the tool payload instead of asking the
-/// model to restate network state it cannot independently verify.
+/// Dựng câu trả lời kết nối từ payload của tool, thay vì để model thuật lại
+/// trạng thái mạng mà nó không tự kiểm chứng được.
 String connectionCompletionText(String result) {
   try {
     final decoded = jsonDecode(result);
@@ -209,7 +203,7 @@ String connectionCompletionText(String result) {
       return 'Đã kết nối thành công đến router $device.';
     }
   } on FormatException {
-    // Fall through to a truthful protocol-error message below.
+    // Rơi xuống thông báo lỗi giao thức đúng sự thật bên dưới.
   }
 
   try {
@@ -218,20 +212,14 @@ String connectionCompletionText(String result) {
       return 'Không thể kết nối router: ${decoded['error']}';
     }
   } on FormatException {
-    // The raw payload is not trustworthy enough to display as a success.
+    // Payload thô không đủ tin cậy để hiển thị như một thành công.
   }
   return 'Không thể xác nhận kết nối router vì kết quả tool không hợp lệ.';
 }
 
-List<String> _toolNames(Object? value) {
-  if (value is! List) return const [];
-  final names = value.whereType<String>().toList()..sort();
-  return names;
-}
-
-/// The user-facing result for a LAN mutation is app-owned, not model-owned.
-/// This deliberately prevents an ungrounded completion from claiming that a
-/// router changed merely because the model saw an IP address in a read result.
+/// Kết quả đổi LAN hiển thị cho người dùng do app quyết định, không phải
+/// model. Để model không tuyên bố router đã đổi chỉ vì nó thấy một địa chỉ IP
+/// trong kết quả đọc.
 String lanChangeCompletionText({
   required bool previewAttempted,
   required String? status,
@@ -255,21 +243,14 @@ String lanChangeCompletionText({
   }
 }
 
-/// A transport failure after the user approves is not evidence that the router
-/// stayed unchanged: apply may already have cut the management connection.
+/// Mất kết nối sau khi người dùng đồng ý không chứng minh router còn nguyên:
+/// lệnh apply có thể đã chạy và cắt đứt đường quản trị.
 String lanChangeUnverifiedText() =>
     'Không thể xác minh kết quả đổi IP LAN sau khi bạn xác nhận. Router có thể '
     'đã áp dụng IP mới; ứng dụng chưa lưu IP mới. Hãy kiểm tra địa chỉ mới hoặc '
     'chờ rollback tự động.';
 
-/// Longest tool result replayed back into a prompt.
-///
-/// A device with many wireless interfaces can produce a result far larger than
-/// the reply itself, and several of those in the window crowd out the tool
-/// schemas. The UI still shows the full text; only the copy the model re-reads
-/// on later turns is capped.
-
-/// Prepares a stored row for replay, shortening over-long tool results.
+/// Chuẩn bị một bản ghi để phát lại, cắt bớt kết quả tool quá dài.
 LlamaChatMessage _replayable(StoredMessage message) {
   if (message.kind != StoredMessageKind.toolResult ||
       message.content.length <= kMaxToolResultChars) {
@@ -287,8 +268,8 @@ LlamaChatMessage _replayable(StoredMessage message) {
   );
 }
 
-/// Drives one conversation: replays history from SQLite, runs the turn, and
-/// persists everything the turn produces.
+/// Điều phối một cuộc trò chuyện: phát lại lịch sử từ SQLite, chạy lượt, và
+/// lưu lại mọi thứ lượt đó sinh ra.
 class ChatController extends ChangeNotifier {
   ChatController({
     required this.database,
@@ -302,12 +283,12 @@ class ChatController extends ChangeNotifier {
   final ChatDatabase database;
   final LlmService llm;
 
-  /// The whole tool catalogue. What is offered to the model on a given round is
-  /// narrowed from it by [toolsFor]; see [send].
+  /// Toàn bộ catalogue. Cái đưa cho model ở mỗi vòng được [toolsFor] lọc ra
+  /// từ đây.
   final List<ToolDefinition> tools;
 
-  /// Read here for one reason: the connected device decides which read tools
-  /// belong in the prompt.
+  /// Đọc ở đây vì một lý do: thiết bị đang kết nối quyết định tool nào được
+  /// đưa vào prompt.
   final ToolHost toolHost;
   final DeviceStore deviceStore;
 
@@ -316,11 +297,11 @@ class ChatController extends ChangeNotifier {
   List<StoredMessage> _messages = [];
   List<StoredMessage> get messages => List.unmodifiable(_messages);
 
-  /// Assistant text streaming in right now, before it is persisted.
+  /// Văn bản trợ lý đang chảy về, chưa lưu xuống SQLite.
   String _streamingText = '';
   String get streamingText => _streamingText;
 
-  /// Tool activity for the in-flight turn, newest last.
+  /// Nhật ký tool của lượt đang chạy, mới nhất ở cuối.
   final List<String> _activeToolLog = [];
   List<String> get activeToolLog => List.unmodifiable(_activeToolLog);
 
@@ -415,8 +396,8 @@ class ChatController extends ChangeNotifier {
     String? lanChangeStatus;
     String? connectionResult;
 
-    // Each refusal reports why. Returning silently here once cost a debugging
-    // session: a stuck engine lock looked exactly like the app ignoring taps.
+    // Mọi lần từ chối đều nói rõ lý do. Trả về im lặng ở đây từng tốn cả buổi
+    // debug: khoá engine bị kẹt trông y hệt app phớt lờ thao tác chạm.
     if (_isGenerating || llm.turnInProgress) {
       _turnError =
           'Model đang bận trả lời câu trước. Đợi một chút rồi thử lại.';
@@ -433,9 +414,8 @@ class ChatController extends ChangeNotifier {
     _turnError = null;
     _streamingText = '';
     _activeToolLog.clear();
-    // Published before the first await, so the composer is disabled in the
-    // same frame as the tap. Without this the awaits below leave a window in
-    // which a second tap starts another turn.
+    // Phát tín hiệu trước await đầu tiên để ô nhập bị khoá ngay trong frame
+    // vừa chạm. Không có nó, các await bên dưới hở ra khe cho cú chạm thứ hai.
     notifyListeners();
 
     final wasEmpty = await database.isEmpty(conversationId);
@@ -448,7 +428,7 @@ class ChatController extends ChangeNotifier {
     );
     notifyListeners();
 
-    // Title the thread after its first prompt, so the list is scannable.
+    // Đặt tên hội thoại theo câu hỏi đầu tiên cho dễ nhìn ở danh sách.
     if (wasEmpty) {
       await database.renameConversation(
         conversationId,
@@ -489,10 +469,9 @@ class ChatController extends ChangeNotifier {
         return;
       }
 
-      // Do not make a safety-critical preview depend on the 3B model obeying
-      // a function-call grammar. The command is parsed only after the user
-      // supplied an explicit interface, IP and netmask; the tool itself still
-      // validates, previews and asks for native UI approval before apply.
+      // Không để bản preview mang tính an toàn phụ thuộc vào việc model tuân
+      // thủ grammar. Chỉ bóc lệnh khi người dùng đã nêu rõ interface, IP và
+      // netmask; tool vẫn validate, preview và xin xác nhận trước khi apply.
       if (directLanCommand != null) {
         if (!toolHost.deviceToolNames.contains('network_set_preview')) {
           await _insertAppResponse(
@@ -504,8 +483,7 @@ class ChatController extends ChangeNotifier {
         return;
       }
 
-      // The engine is stateless between turns: rebuild the prompt from the
-      // persisted history every time.
+      // Engine không nhớ gì giữa các lượt: dựng lại prompt từ lịch sử đã lưu.
       final window = await database.recentMessages(conversationId);
       final routerState = await buildRouterState(
         deviceStore: deviceStore,
@@ -525,27 +503,25 @@ class ChatController extends ChangeNotifier {
         llm: llm,
         messages: replayed,
         tools: tools,
-        // Evaluated per round by the turn loop, so a connect_device call made
-        // in this same turn unlocks the device's read tools for the next round.
+        // Được tính lại mỗi vòng, nên connect_device gọi trong chính lượt này
+        // sẽ mở khoá các tool đọc cho vòng sau.
         provideTools: () => toolsFor(tools, toolHost.deviceToolNames),
-        // For an explicit static LAN request, the handler itself reads
-        // network_get before preview. Restricting this model round to preview
-        // removes the 3B model's opportunity to stop after a read and invent
-        // an apply result.
+        // Với lệnh đổi LAN tĩnh rõ ràng, chính handler đã đọc network_get
+        // trước khi preview. Ép vòng này chỉ được gọi preview để model không
+        // dừng sau bước đọc rồi bịa ra kết quả apply.
         requiredToolName: requiresLanPreview ? 'network_set_preview' : null,
       )) {
         switch (event) {
           case TextDelta(:final text):
-            // A LAN mutation summary is derived from the app-owned outcome
-            // below. Never stream a model claim before that outcome exists.
+            // Tóm tắt đổi LAN lấy từ kết quả do app sở hữu bên dưới. Không
+            // bao giờ stream lời model nói trước khi có kết quả đó.
             if (!requiresLanPreview) {
               _streamingText += text;
               notifyListeners();
             }
 
           case ThinkingDelta():
-            // Reasoning is persisted with the finished message instead of
-            // being streamed into the transcript.
+            // Phần suy luận lưu kèm tin nhắn hoàn chỉnh, không stream ra.
             break;
 
           case ToolCallRequested(:final id, :final name, :final arguments):
@@ -577,17 +553,12 @@ class ChatController extends ChangeNotifier {
             await database.insertMessage(
               conversationId: conversationId,
               kind: StoredMessageKind.toolResult,
-              // Stored verbatim. No read tool returns a secret: the agent's
-              // wifi_get does not read the passphrase, which is what makes the
-              // claim in its description and in rule 8 true rather than merely
-              // asserted. A redaction layer used to sit here for a value nothing
-              // ever produced — it was removed because a protection that never
-              // fires is indistinguishable from one that does not exist, and it
-              // told the model to call a tool for a passphrase it cannot get.
+              // Lưu nguyên văn: không tool đọc nào trả về bí mật. wifi_get
+              // không đọc mật khẩu WiFi — đó là thứ làm quy tắc 4 trong
+              // kSystemPrompt đúng thật chứ không chỉ là lời khẳng định.
               //
-              // A write tool that echoes a staged passphrase back would change
-              // this. That is the point to reintroduce redaction, on the value
-              // the app itself supplied — not on the agent's output.
+              // Chỉ cần che ở đây nếu sau này có tool ghi trả lại mật khẩu đã
+              // staged, và khi đó che giá trị của app chứ không phải của agent.
               content: result,
               toolName: name,
               toolCallId: id,
@@ -600,9 +571,9 @@ class ChatController extends ChangeNotifier {
             :final isFinal,
           ):
             _streamingText = '';
-            // Prose emitted with a tool call is a preamble, not a finished
-            // answer. Suppress it for a protected LAN change. When the turn
-            // is final, persist only a status derived from the tool outcome.
+            // Văn bản đi kèm tool call chỉ là lời dạo đầu. Với luồng đổi LAN
+            // được bảo vệ thì bỏ hẳn, và chỉ lưu trạng thái suy ra từ kết quả
+            // tool khi lượt kết thúc.
             final completedText = requiresLanPreview
                 ? (isFinal
                       ? lanChangeCompletionText(
@@ -630,7 +601,7 @@ class ChatController extends ChangeNotifier {
       _isGenerating = false;
       _streamingText = '';
       _activeToolLog.clear();
-      // Re-read so the displayed order matches the persisted order exactly.
+      // Đọc lại để thứ tự hiển thị khớp đúng thứ tự đã lưu.
       await loadHistory();
     }
   }

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../net/device_profile.dart';
+import 'app_theme.dart';
 
-/// Manages the saved OpenWrt devices.
+/// Quản lý danh sách thiết bị OpenWrt đã lưu.
 ///
-/// This is the only place a password is ever entered or stored. Tools receive
-/// an alias, never credentials.
+/// Đây là nơi duy nhất mật khẩu được nhập và lưu. Tool chỉ nhận bí danh, không
+/// bao giờ nhận thông tin đăng nhập.
 class DeviceSettingsScreen extends StatefulWidget {
   const DeviceSettingsScreen({super.key, required this.store});
 
@@ -37,40 +38,121 @@ class _DeviceSettingsScreenState extends State<DeviceSettingsScreen> {
     if (saved == true) await _refresh();
   }
 
+  /// Xoá thiết bị cũng xoá mật khẩu trong keystore, nên hỏi lại một lần.
+  Future<void> _confirmDelete(DeviceProfile device) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Xoá thiết bị?'),
+        content: Text(
+          '“${device.alias}” và mật khẩu SSH đã lưu sẽ bị xoá khỏi máy.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Huỷ'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            child: const Text('Xoá'),
+          ),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    await widget.store.delete(device.id);
+    await _refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Thiết bị OpenWrt')),
       body: _devices.isEmpty
-          ? const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: Text(
-                  'Chưa có thiết bị nào.\n\n'
+          ? const EmptyState(
+              icon: Icons.router_outlined,
+              title: 'Chưa có thiết bị nào',
+              message:
                   'Thêm router OpenWrt để chatbot có thể đọc và cấu hình '
-                  'qua SSH.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
+                  'qua SSH trong mạng LAN.',
             )
-          : ListView.separated(
+          : ListView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
               itemCount: _devices.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final device = _devices[index];
-                return ListTile(
-                  leading: const Icon(Icons.router_outlined),
-                  title: Text(device.alias),
-                  subtitle: Text(
-                    '${device.username}@${device.host}:${device.port}',
-                  ),
-                  onTap: () => _edit(existing: device),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete_outline),
-                    onPressed: () async {
-                      await widget.store.delete(device.id);
-                      await _refresh();
-                    },
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Material(
+                    color: scheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(AppTheme.radius),
+                    child: InkWell(
+                      onTap: () => _edit(existing: device),
+                      borderRadius: BorderRadius.circular(AppTheme.radius),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: scheme.primaryContainer.withValues(
+                                  alpha: 0.6,
+                                ),
+                                borderRadius: BorderRadius.circular(11),
+                              ),
+                              child: Icon(
+                                Icons.router_outlined,
+                                size: 19,
+                                color: scheme.onPrimaryContainer,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    device.alias,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyLarge
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${device.username}@${device.host}'
+                                    ':${device.port}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: scheme.onSurfaceVariant,
+                                          fontFamily: 'monospace',
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, size: 20),
+                              tooltip: 'Xoá',
+                              color: scheme.outline,
+                              onPressed: () => _confirmDelete(device),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 );
               },
@@ -105,6 +187,7 @@ class _DeviceEditDialogState extends State<_DeviceEditDialog> {
   );
   final _password = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  bool _showPassword = false;
 
   @override
   void dispose() {
@@ -122,7 +205,7 @@ class _DeviceEditDialogState extends State<_DeviceEditDialog> {
       host: _host.text.trim(),
       port: int.parse(_port.text.trim()),
       username: _username.text.trim(),
-      // Empty on edit means "keep the existing password".
+      // Để trống khi sửa nghĩa là "giữ nguyên mật khẩu cũ".
       password: _password.text.isEmpty ? null : _password.text,
     );
     if (mounted) Navigator.of(context).pop(true);
@@ -131,6 +214,8 @@ class _DeviceEditDialogState extends State<_DeviceEditDialog> {
   @override
   Widget build(BuildContext context) {
     final isNew = widget.existing == null;
+    final scheme = Theme.of(context).colorScheme;
+
     return AlertDialog(
       title: Text(isNew ? 'Thêm thiết bị' : 'Sửa thiết bị'),
       content: Form(
@@ -141,52 +226,104 @@ class _DeviceEditDialogState extends State<_DeviceEditDialog> {
             children: [
               TextFormField(
                 controller: _alias,
+                textCapitalization: TextCapitalization.none,
                 decoration: const InputDecoration(
                   labelText: 'Bí danh',
                   helperText: 'Tên chatbot dùng để gọi, ví dụ: RouterNha',
+                  helperMaxLines: 2,
+                  prefixIcon: Icon(Icons.badge_outlined, size: 20),
                 ),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Bắt buộc' : null,
               ),
+              const SizedBox(height: 20),
               TextFormField(
                 controller: _host,
+                keyboardType: TextInputType.url,
                 decoration: const InputDecoration(
                   labelText: 'Địa chỉ IP',
-                  helperText: 'Ví dụ 192.168.1.1. Từ emulator, máy tính '
-                      'host là 10.0.2.2',
+                  helperText: 'Ví dụ 192.168.1.1 — emulator: 10.0.2.2',
+                  prefixIcon: Icon(Icons.lan_outlined, size: 20),
                 ),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Bắt buộc' : null,
               ),
-              TextFormField(
-                controller: _port,
-                decoration: const InputDecoration(labelText: 'Cổng SSH'),
-                keyboardType: TextInputType.number,
-                validator: (v) {
-                  final port = int.tryParse(v?.trim() ?? '');
-                  return (port == null || port < 1 || port > 65535)
-                      ? 'Cổng không hợp lệ'
-                      : null;
-                },
+              const SizedBox(height: 20),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: TextFormField(
+                      controller: _username,
+                      decoration: const InputDecoration(
+                        labelText: 'Tên đăng nhập',
+                        prefixIcon: Icon(Icons.person_outline, size: 20),
+                      ),
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? 'Bắt buộc' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _port,
+                      decoration: const InputDecoration(labelText: 'Cổng'),
+                      keyboardType: TextInputType.number,
+                      validator: (v) {
+                        final port = int.tryParse(v?.trim() ?? '');
+                        return (port == null || port < 1 || port > 65535)
+                            ? 'Sai'
+                            : null;
+                      },
+                    ),
+                  ),
+                ],
               ),
-              TextFormField(
-                controller: _username,
-                decoration: const InputDecoration(labelText: 'Tên đăng nhập'),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Bắt buộc' : null,
-              ),
+              const SizedBox(height: 20),
               TextFormField(
                 controller: _password,
-                obscureText: true,
+                obscureText: !_showPassword,
                 decoration: InputDecoration(
                   labelText: 'Mật khẩu',
                   helperText: isNew
-                      ? 'Lưu vào keystore của hệ thống, không vào SQLite'
+                      ? 'Lưu vào keystore, không vào SQLite'
                       : 'Để trống nếu không đổi mật khẩu',
+                  prefixIcon: const Icon(Icons.lock_outline, size: 20),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _showPassword
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      size: 20,
+                    ),
+                    tooltip: _showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu',
+                    onPressed: () =>
+                        setState(() => _showPassword = !_showPassword),
+                  ),
                 ),
-                validator: (v) => (isNew && (v == null || v.isEmpty))
-                    ? 'Bắt buộc'
-                    : null,
+                validator: (v) =>
+                    (isNew && (v == null || v.isEmpty)) ? 'Bắt buộc' : null,
+              ),
+              const SizedBox(height: 20),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.shield_outlined,
+                    size: 15,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Dùng IP phía LAN. Mật khẩu không đi qua model.',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

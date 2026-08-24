@@ -5,8 +5,8 @@ import 'package:chatbot/net/mcp_client.dart';
 import 'package:chatbot/net/mcp_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Builds the reply shape `new_text_result()` produces on the router: the
-/// tool's own JSON carried as a *string* inside the MCP content array.
+/// Dựng đúng hình dạng phản hồi `new_text_result()` sinh ra trên router: JSON
+/// của chính tool nằm dạng *chuỗi* trong mảng content của MCP.
 Map<String, dynamic> textResult(int id, Map<String, dynamic> toolEnvelope) => {
   'jsonrpc': '2.0',
   'id': id,
@@ -14,7 +14,7 @@ Map<String, dynamic> textResult(int id, Map<String, dynamic> toolEnvelope) => {
     'content': [
       {'type': 'text', 'text': jsonEncode(toolEnvelope)},
     ],
-    // Always false, even for failures — see the note in _unwrapToolResult.
+    // Luôn false, kể cả khi lỗi — xem ghi chú ở _unwrapToolResult.
     'isError': false,
   },
 };
@@ -27,7 +27,7 @@ Map<String, dynamic> listResult(int id, List<String> names) => {
       for (final name in names)
         {
           'name': name,
-          // The device does send descriptions. They must never be used.
+          // Thiết bị có gửi mô tả. Tuyệt đối không được dùng chúng.
           'description': 'mô tả do THIẾT BỊ cung cấp',
           'inputSchema': {'type': 'object'},
         },
@@ -45,8 +45,8 @@ Map<String, dynamic> initResult(int id) => {
   },
 };
 
-/// A transport that answers `initialize` and `tools/list` normally and defers
-/// every `tools/call` to [onCall].
+/// Transport trả lời `initialize` và `tools/list` như bình thường, còn mọi
+/// `tools/call` thì giao cho [onCall].
 FakeMcpTransport transportWith({
   List<String> tools = const [
     'traffic_stats',
@@ -93,8 +93,8 @@ void main() {
 
       final server = await client.connect();
 
-      // Both requests rode the same call: the server reads stdin in a loop, so
-      // a second SSH exec would be a wasted round trip.
+      // Hai yêu cầu đi chung một lần gọi: server đọc stdin theo vòng lặp nên
+      // mở exec SSH thứ hai là phí một round trip.
       expect(transport.requests.map((r) => r['method']), [
         'initialize',
         'tools/list',
@@ -113,8 +113,8 @@ void main() {
         'route_info',
         'wifi_get',
       });
-      // McpServerInfo has nowhere to put a device-supplied description, which
-      // is the point: nothing the router writes can reach the model's prompt.
+      // McpServerInfo không có chỗ chứa mô tả do thiết bị gửi — đó chính là
+      // mục đích: không chữ nào router viết chạm được vào prompt.
     });
   });
 
@@ -151,10 +151,9 @@ void main() {
     });
 
     test('a tool failure is an error even though isError says false', () async {
-      // The router builds failures with the same helper as successes, so the
-      // MCP-level flag is useless. Only `status` inside the text is truthful,
-      // and getting this wrong hands the model an error object as if it were
-      // configuration.
+      // Router dựng lỗi bằng cùng helper với thành công nên cờ ở mức MCP vô
+      // dụng. Chỉ `status` bên trong text mới đúng; hiểu sai chỗ này là đưa
+      // cho model một object lỗi như thể đó là cấu hình.
       final client = await connected(
         onCall: (request) => textResult(request['id'] as int, {
           'status': 'error',
@@ -178,8 +177,8 @@ void main() {
     });
 
     test('separates a wrong argument from a sick router', () {
-      // What the model should do next differs: retry with another name, or
-      // stop and report. The split is what tells the two apart.
+      // Việc model nên làm tiếp là khác nhau: thử tên khác, hay dừng và báo.
+      // Chia nhóm chính là thứ phân biệt hai trường hợp.
       expect(isRouterFault('section_not_found'), isFalse);
       expect(isRouterFault('invalid_interface'), isFalse);
       expect(isRouterFault('backend_unavailable'), isTrue);
@@ -187,14 +186,13 @@ void main() {
     });
 
     test('tool_failed is ambiguous, not a router fault', () {
-      // run_tool() on the router throws the tool's own error envelope away and
-      // reports this one code for everything. Reading it as "router is broken"
-      // told the model to stop when the real cause was a mistyped section name
-      // that a second attempt would have fixed.
+      // run_tool() trên router vứt vỏ lỗi của chính tool và báo đúng một mã
+      // cho mọi thứ. Hiểu nó thành "router hỏng" sẽ bảo model dừng, trong khi
+      // nguyên nhân thật chỉ là gõ sai tên section.
       expect(isAmbiguousFailure('tool_failed'), isTrue);
       expect(isRouterFault('tool_failed'), isFalse);
 
-      // Nothing else is ambiguous: the other codes do identify their cause.
+      // Không mã nào khác nhập nhằng: các mã còn lại đều chỉ rõ nguyên nhân.
       expect(isAmbiguousFailure('section_not_found'), isFalse);
       expect(isAmbiguousFailure('backend_unavailable'), isFalse);
     });
@@ -221,8 +219,8 @@ void main() {
 
       await client.callTool('wifi_get', {'section': 'ra0'});
 
-      // The server rejects any unexpected field, so the client must not
-      // decorate the payload.
+      // Server từ chối mọi field lạ, nên client không được thêm thắt gì vào
+      // payload.
       final params = transport.requests.last['params'] as Map<String, dynamic>;
       expect(params['name'], 'wifi_get');
       expect(params['arguments'], {'section': 'ra0'});
@@ -320,8 +318,8 @@ void main() {
     });
 
     test('a truncated batch is fatal, not silently short', () {
-      // Callers pair replies with requests by position, so a missing line
-      // would otherwise shift every answer onto the wrong question.
+      // Bên gọi ghép phản hồi với yêu cầu theo vị trí, nên thiếu một dòng là
+      // mọi câu trả lời lệch sang câu hỏi khác.
       expect(
         () => decodeJsonRpcLines(
           '{"jsonrpc":"2.0","id":1,"result":{}}\n',

@@ -1,11 +1,10 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sqflite/sqflite.dart';
 
-/// An OpenWrt device the app can SSH into.
+/// Một thiết bị OpenWrt mà app có thể SSH vào.
 ///
-/// The password is deliberately absent: it lives in the platform keystore via
-/// [DeviceStore], never in SQLite and never in a tool argument. The model only
-/// ever sees [alias].
+/// Cố ý không có mật khẩu: nó nằm trong keystore hệ thống qua [DeviceStore],
+/// không vào SQLite và không vào tham số tool. Model chỉ thấy [alias].
 class DeviceProfile {
   final int id;
   final String alias;
@@ -29,18 +28,16 @@ class DeviceProfile {
     username: row['username'] as String,
   );
 
-  /// What the model is allowed to see about this device.
+  /// Phần thông tin model được phép thấy về thiết bị này.
   Map<String, Object?> toModelJson() => {'alias': alias};
 }
 
-/// Resolves a name supplied in a chat request to one saved device alias.
+/// Ánh xạ tên trong câu chat về đúng một bí danh thiết bị đã lưu.
 ///
-/// The model occasionally emits the generic word `router` instead of the
-/// saved alias (for example `oneai`). Treating that as an automatic failure
-/// makes a one-router setup need a second model turn. We accept a shortened
-/// name when it identifies exactly one saved device, and fall back to the
-/// only saved device when there is one. Anything ambiguous still returns null
-/// so the caller never connects to an arbitrary router.
+/// Model thỉnh thoảng viết chữ chung chung `router` thay vì bí danh thật. Chấp
+/// nhận tên rút gọn khi nó chỉ khớp đúng một thiết bị, và fallback về thiết bị
+/// duy nhất nếu chỉ có một. Mọi trường hợp nhập nhằng vẫn trả null để không
+/// bao giờ kết nối nhầm router.
 String? resolveDeviceAlias(String requestedAlias, Iterable<String> aliases) {
   final requested = _normaliseAlias(requestedAlias);
   if (requested.isEmpty) return null;
@@ -60,17 +57,16 @@ String? resolveDeviceAlias(String requestedAlias, Iterable<String> aliases) {
       .toList(growable: false);
   if (partial.length == 1) return partial.single;
 
-  // There is no alternative device to accidentally select. This makes a
-  // generic model argument such as "router" work with a saved alias such as
-  // "oneai", while retaining strict matching as soon as a second device is
-  // configured.
+  // Chỉ có một thiết bị nên không thể chọn nhầm. Nhờ vậy tham số chung chung
+  // như "router" vẫn khớp bí danh "oneai", và quay lại khớp nghiêm ngặt ngay
+  // khi có thiết bị thứ hai.
   return candidates.length == 1 ? candidates.single : null;
 }
 
 String _normaliseAlias(String value) =>
     value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
 
-/// Stores device profiles, splitting secrets from non-secrets.
+/// Lưu hồ sơ thiết bị, tách phần bí mật khỏi phần không bí mật.
 class DeviceStore {
   DeviceStore(this._db, {FlutterSecureStorage? secureStorage})
     : _secure = secureStorage ?? const FlutterSecureStorage();
@@ -137,7 +133,7 @@ class DeviceStore {
       deviceId = id;
     }
 
-    // A null password on edit means "keep the stored one" rather than "clear".
+    // Mật khẩu null khi sửa nghĩa là "giữ nguyên cái đã lưu", không phải "xoá".
     if (password != null) {
       await _secure.write(key: '$_passwordKeyPrefix$deviceId', value: password);
     }
@@ -157,7 +153,7 @@ class DeviceStore {
     await _secure.delete(key: '$_passwordKeyPrefix$id');
   }
 
-  /// Reads a device password. Only the SSH layer calls this.
+  /// Đọc mật khẩu thiết bị. Chỉ tầng SSH gọi hàm này.
   Future<String?> passwordFor(int deviceId) =>
       _secure.read(key: '$_passwordKeyPrefix$deviceId');
 }
