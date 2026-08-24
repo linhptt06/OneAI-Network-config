@@ -52,8 +52,8 @@ flutter config --enable-native-assets   # llamadart cần cờ này
 2. Bấm **Create Device** → chọn **Pixel 7** (hoặc máy bất kỳ) → **Next**.
 3. Chọn system image **API 36 (x86_64)** → tải về → **Next**.
 4. Bấm **Show Advanced Settings**, đặt:
-   - **RAM: 4096 MB** (dưới mức này model sẽ không nạp nổi)
-   - **Internal Storage: 8192 MB**
+   - **RAM: >= 6GB** (recommended)
+   - **Internal Storage: >= 8192 MB** (recommended)
 5. Đặt tên (ví dụ `test_phone`) → **Finish**.
 
 ### Cách 2 — dòng lệnh
