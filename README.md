@@ -156,7 +156,6 @@ trên xuống chính là một lượt test đầy đủ.
 | `network_get` | `Cấu hình WAN thế nào?` | Đọc interface `wan` |
 | `network_list` | `Router có những interface nào?` | Danh sách interface UCI |
 | `wifi_get` | `Tên WiFi là gì?` | SSID, mã hoá, kênh của `ra0` |
-| `wifi_get` | `Cho xem cấu hình wifi rax0` | Đọc đúng section `rax0` |
 | `route_info` | `Router đang ra Internet bằng đường nào?` | Bảng định tuyến, gateway |
 | `traffic_stats` | `Cổng br-lan đã truyền bao nhiêu dữ liệu?` | Tổng byte/gói cộng dồn |
 
@@ -227,114 +226,6 @@ flutter run -d emulator-5554 -v
 ```bash
 adb exec-out screencap -p > screen.png
 ```
-
-### Model tải mãi không xong hoặc báo lỗi 401
-
-Hugging Face trả **401 (không phải 404)** cho đường dẫn sai, nên lỗi "auth"
-thường thật ra là **gõ sai tên repo hoặc tên file**. Kiểm tra hằng số
-`kDefaultModelSource` trong [lib/llm/llm_service.dart](lib/llm/llm_service.dart)
-— tên repo và tên file phân biệt hoa thường.
-
-### Model trả lời cực chậm (vài phút cho một câu)
-
-Nguyên nhân gần như luôn là **thiếu RAM trên máy tính chủ**, không phải model to.
-
-Model mặc định là Qwen2.5-3B (~2 GB), cộng thêm khoảng 150 MB KV cache. Nếu máy
-tính chỉ có 8 GB RAM mà emulator đã chiếm 4 GB, Windows sẽ swap và một lượt hỏi
-có thể mất tới ~10 phút.
-
-Số đo thực tế trên máy 7.7 GB RAM + emulator 4 GB, **bản release**: một lượt có
-tool call (`list_devices`) mất **~8 phút** từ lúc gửi tới lúc có câu trả lời.
-Bản debug còn chậm hơn nữa. App vẫn chạy đúng, chỉ là chậm.
-
-Cách xử lý, theo thứ tự ưu tiên:
-
-1. **Chạy trên điện thoại thật** thay vì emulator — nhanh hơn nhiều.
-2. Đóng bớt Chrome / Android Studio trước khi chạy.
-3. Đổi sang model nhỏ hơn trong [lib/llm/llm_service.dart](lib/llm/llm_service.dart):
-   sửa `kDefaultModelSource` thành `kModel3bSmaller` (~1.5 GB).
-
-Kiểm tra RAM thực tế app đang dùng:
-
-```bash
-adb shell dumpsys meminfo com.example.chatbot | grep "TOTAL PSS"
-```
-
-### Emulator tự tắt giữa chừng
-
-Thường là do **hết RAM máy chủ**. Đừng chạy `flutter build` trong khi emulator
-đang mở nếu máy chỉ có 8 GB: Gradle ăn hết RAM còn lại và Windows sẽ giết tiến
-trình emulator. Build xong rồi mới bật emulator.
-
-Nếu emulator biến mất, bật lại rồi chờ boot xong hẳn:
-
-```bash
-flutter emulators --launch test_phone
-adb wait-for-device
-adb devices          # chờ tới khi hiện emulator-5554  device
-```
-
-### Hiện hộp thoại "System UI isn't responding"
-
-Đây là **Android bị đói RAM**, không phải app crash. Bấm **Wait**, chờ model nạp
-xong là hết. Xảy ra khi emulator vừa boot mà app đã bắt đầu nạp model 2 GB.
-
-### Cài bản release đè lên bản debug mà không mất model đã tải
-
-Bản release đang ký bằng **debug key** (xem `android/app/build.gradle.kts`), nên
-cài đè được, giữ nguyên dữ liệu app kể cả file model 2 GB:
-
-```bash
-adb install -r build/app/outputs/flutter-apk/app-release.apk
-```
-
-Đừng dùng `adb uninstall` — sẽ xoá luôn model và phải tải lại từ đầu.
-
-### Model nói "đang kiểm tra…" thay vì gọi tool
-
-Model nhỏ hay bị vậy khi danh sách tool quá dài. App đã chống bằng cách chỉ đưa
-cho model đúng những tool dùng được ở thời điểm đó (`toolsFor`). Nếu bạn vừa
-thêm tool mới mà gặp hiện tượng này, hãy bớt tool đi.
-
-### Lỗi build trên Windows: `Cannot open include file: 'atlstr.h'`
-
-Bạn đang build nhầm target Windows. App **chỉ chạy Android**. Kiểm tra emulator
-đã bật chưa rồi chỉ định target rõ ràng:
-
-```bash
-flutter run -d emulator-5554
-```
-
-(Nếu thực sự cần build Windows: phải cài thêm component
-`Microsoft.VisualStudio.Component.VC.ATL` trong Visual Studio Installer. Nhưng
-app vẫn sẽ không chạy vì `sqflite` không hỗ trợ Windows.)
-
-### Build Gradle lỗi hoặc treo
-
-```bash
-flutter clean
-flutter pub get
-flutter build apk --debug
-```
-
-Lần build Android đầu tiên mất khoảng 10 phút vì phải tải Gradle và biên dịch
-native của llamadart. Đây là bình thường, không phải treo.
-
----
-
-## Kiểm thử tự động
-
-```bash
-flutter analyze     # phải ra "No issues found!"
-flutter test        # 83 test
-```
-
-Toàn bộ test chạy **không cần router thật**: kiểm tra hợp lệ IP/netmask,
-catalogue tool, luồng đổi LAN, và giao thức MCP — tất cả đều là hàm thuần hoặc
-dùng transport giả.
-
----
-
 ## Cấu trúc mã
 
 | Thư mục | Nội dung |
