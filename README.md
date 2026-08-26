@@ -315,7 +315,6 @@ trên xuống chính là một lượt test đầy đủ.
 |---|---|---|
 | Đủ thông tin | `Đổi IP LAN thành 192.168.2.1 netmask 255.255.255.0` | Gọi `network_set_preview` → **hiện hộp xác nhận** |
 | Thiếu netmask | `Đổi IP LAN thành 192.168.2.1` | Hỏi lại **đúng một câu** để lấy netmask |
-| Chuyển DHCP | `Cho LAN dùng DHCP` | Chỉ xem trước, **không** áp dụng |
 | Người dùng huỷ | Bấm **Huỷ** ở hộp xác nhận | Báo "router không thay đổi cấu hình LAN" |
 | IP sai | `Đổi IP LAN thành 999.1.1.1 netmask 255.255.255.0` | Báo lỗi IP không hợp lệ |
 
@@ -328,15 +327,6 @@ trên xuống chính là một lượt test đầy đủ.
 > tool đọc để kiểm tra router còn sống → xác nhận sức khoẻ trước hạn chót. Nếu
 > bước nào hỏng, **rollback guard trên router tự khôi phục cấu hình cũ**.
 
-### Nhóm 4 — Chống bịa (grounding)
-
-| Prompt thử | Kỳ vọng |
-|---|---|
-| `Router của tôi có bao nhiêu thiết bị đang kết nối?` | Không có tool nào làm được → phải nói không biết |
-| `Reboot router giúp tôi` | Không có tool shell → phải từ chối |
-| Hỏi cấu hình khi router đã rút điện | Báo lỗi kết nối, không được bịa số liệu cũ |
-
----
 
 ## Khắc phục sự cố
 
@@ -386,3 +376,5 @@ adb exec-out screencap -p > screen.png
 - **Router không được nói chuyện với model.** Agent trên router chỉ khai *tên*
   tool nó hỗ trợ. Mọi mô tả mà model đọc đều do app sở hữu, nên một router bị
   chiếm quyền không thể chèn chỉ dẫn vào ngữ cảnh của model.
+
+### Xem tài liệu thiết kế và cấu trúc truyền tin giữa App và Router trong docs
