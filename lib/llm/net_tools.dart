@@ -82,28 +82,19 @@ List<ToolDefinition> toolsFor(
 // nên đoán sai là không có đường sửa.
 const String kDefaultNetworkInterface = 'lan';
 
-/// Đọc từ board đích (MediaTek MT7993). OpenWrt gốc gọi là `default_radio0`,
-/// firmware hãng thì không.
+/// Section Wi-Fi AP đang bật trên router OpenWrt đang dùng. Tên này được lấy
+/// từ `uci show wireless`: `ra0` là wifi-iface 5 GHz có SSID `oneai`.
 const String kDefaultWifiSection = 'ra0';
 const String kDefaultTrafficInterface = 'br-lan';
 
-/// Các section wireless đưa cho model, đọc từ board đích.
+/// Các section wireless đưa cho model.
 ///
 /// Khai báo dạng enum chứ không kể trong mô tả: mô tả chỉ là lời khuyên mà
 /// model nhỏ bỏ qua — nó từng bịa ra `wlan0` dù có sẵn danh sách này trước mặt
 /// — còn enum thành ràng buộc grammar GBNF mà sampler không thoát ra được.
 ///
-/// Cố ý bỏ `apcli0`/`apclix0`: đó là uplink sang mạng của người khác, gọi nó
-/// là "WiFi của bạn" là nói dối. Bỏ `apmld1` vì `wifi_get` từ chối kiểu đó.
-const List<String> kWifiSections = [
-  'ra0',
-  'ra1',
-  'ra2',
-  'rax0',
-  'rax1',
-  'MT7993_1_1',
-  'MT7993_1_2',
-];
+/// Luôn đọc AP đang bật thay vì radio hoặc interface client/đang tắt.
+const List<String> kWifiSections = [kDefaultWifiSection];
 
 /// Các interface mạng đưa cho model. `wan6` là nửa IPv6 của WAN.
 const List<String> kNetworkInterfaces = ['lan', 'wan', 'wan6'];
@@ -219,9 +210,7 @@ ToolDefinition _wifiGet(ToolHost host) => _readTool(
   name: 'wifi_get',
   description:
       'Đọc cấu hình WiFi của router: tên mạng (SSID), kiểu mã hoá, chế độ, '
-      'kênh. KHÔNG đọc được mật khẩu WiFi. ra0/ra1/ra2 là mạng 2.4 GHz, '
-      'rax0/rax1 là băng cao, MT7993_1_1 và MT7993_1_2 là radio (kênh, '
-      'băng tần).',
+      'kênh. KHÔNG đọc được mật khẩu WiFi.',
   argument: 'section',
   argumentDescription:
       'Section wireless cần đọc. Bỏ trống thì đọc $kDefaultWifiSection.',

@@ -106,7 +106,30 @@ scp -O -p files/init.d/router-agent-rollback-guard \
 trên OpenWrt. Nếu router dùng OpenSSH hiện đại và báo lỗi với `-O`, có thể bỏ cờ
 này.
 
-### 3. Bật rollback guard và kiểm tra
+### Các file được chép sang router dùng để làm gì?
+
+Sau khi copy, thư mục trên router có dạng như sau:
+
+```text
+/usr/libexec/router-agent/
+├── mcp_stdio_server
+├── runtime_probe
+└── rollback_guard
+```
+
+| File | Khi nào chạy? | Nhiệm vụ |
+|---|---|---|
+| `mcp_stdio_server` | Mỗi khi app gọi một tool router qua SSH | Là MCP server chính. Nó đọc JSON-RPC từ `stdin`, gọi các handler C an toàn để đọc cấu hình/trạng thái router hoặc thực hiện luồng đổi LAN đã được duyệt, rồi ghi JSON trả lời ra `stdout`. App chạy file này qua SSH exec; nó không chạy nền liên tục. |
+| `runtime_probe` | Chạy thủ công trước khi dùng app hoặc khi chẩn đoán | Chỉ kiểm tra môi trường router: kiến trúc CPU, musl loader, file cấu hình UCI, các thư viện `libuci`/`libubus`, `ubus` và `procd`. File này không ghi cấu hình, không reload mạng và không đọc secret Wi-Fi. |
+| `rollback_guard` | Chạy liên tục dưới quản lý của `procd` | Theo dõi giao dịch đổi IP LAN đã được agent tạo. Nếu app không kết nối lại và gửi health-confirm trước hạn chót, nó phục hồi backup cấu hình cũ rồi áp dụng lại mạng để tránh bị mất quyền quản trị router. |
+| `router-agent-rollback-guard` | Init script ở `/etc/init.d/` | Không phải binary C. Script này yêu cầu `procd` khởi động, tự chạy lại và dừng `rollback_guard` theo vòng đời của router. |
+
+> Các tool như `network_get`, `wifi_get`, `route_info`, `network_set_preview`,
+> `network_set_apply` và `network_set_health_confirm` **không phải file thực
+> thi riêng**. Chúng được link vào `mcp_stdio_server` và chỉ được gọi qua giao
+> thức MCP/JSON-RPC.
+
+### 3. Cài init script, bật rollback guard và kiểm tra
 
 Rollback guard tự khôi phục cấu hình cũ nếu đổi IP LAN không được ứng dụng xác
 nhận lại trước hạn chót. Cài và bật service trên router:
@@ -116,7 +139,6 @@ ssh "$ROUTER_DEST" '
   chmod 755 /usr/libexec/router-agent/mcp_stdio_server \
     /usr/libexec/router-agent/runtime_probe \
     /usr/libexec/router-agent/rollback_guard
-  chmod 755 /usr/libexec/router-agent/*
   install -m 0755 /tmp/router-agent-rollback-guard \
     /etc/init.d/router-agent-rollback-guard
   /etc/init.d/router-agent-rollback-guard enable
@@ -133,11 +155,30 @@ IP LAN. Nếu chỉ muốn kiểm tra khả năng runtime trước khi dùng app
 ssh "$ROUTER_DEST" /usr/libexec/router-agent/runtime_probe
 ```
 
+Để kiểm tra riêng MCP server mà chưa mở app, gửi một yêu cầu `tools/list` qua
+SSH. Đây chỉ là thao tác đọc capability, không đổi cấu hình router:
+
+```sh
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke-test","version":"1"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | ssh "$ROUTER_DEST" /usr/libexec/router-agent/mcp_stdio_server
+```
+
+Kết quả cần có phản hồi cho `id: 1` và `id: 2`; phản hồi `id: 2` liệt kê các
+tool mà app có thể dùng. Lệnh này cũng minh họa trực tiếp một SSH exec channel:
+SSH khởi chạy `mcp_stdio_server`, chuyển dữ liệu JSON qua standard input/output
+rồi đóng process sau khi server đọc hết dữ liệu.
+
 > Không dừng hoặc cập nhật `rollback_guard` khi đang có một giao dịch đổi mạng
 > chờ xác nhận. Nếu cần cập nhật, chỉ thực hiện sau khi không còn giao dịch
 > pending.
-Không dừng `rollback_guard` khi đang đổi IP LAN. Dùng IP LAN của router và giữ
-đường quản trị dự phòng khi thử thay đổi mạng.
+
+> Dùng IP LAN của router và luôn giữ serial console hoặc một đường quản trị dự
+> phòng khi thử thay đổi IP LAN. Rollback guard chỉ bảo vệ các giao dịch do
+> Router Agent tạo, không thể khôi phục thay đổi cấu hình được làm thủ công bên
+> ngoài agent.
 
 ---
 
