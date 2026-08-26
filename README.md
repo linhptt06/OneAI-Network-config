@@ -106,8 +106,6 @@ scp -O -p files/init.d/router-agent-rollback-guard \
 trên OpenWrt. Nếu router dùng OpenSSH hiện đại và báo lỗi với `-O`, có thể bỏ cờ
 này.
 
-Các file được chép sang router dùng để làm gì?
-
 Sau khi copy, thư mục trên router có dạng như sau:
 
 ```text
