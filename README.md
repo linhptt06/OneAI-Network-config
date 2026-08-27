@@ -86,7 +86,10 @@ thích.
 
 ### 1. Build trên build server
 Đăng nhập vào server build: ssh inter01@10.2.204.210 và nhập mật khẩu
-
+```sh
+cd /path/to/router-agent
+make
+```
 ### 2. Copy binary sang router bằng SCP
 Copy ba binary sang router OpenWrt tương thích (bản này nhắm AArch64/musl):
 
