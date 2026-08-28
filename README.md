@@ -263,7 +263,6 @@ trên xuống chính là một lượt test đầy đủ.
 | `network_get` | `Cấu hình WAN thế nào?` | Đọc interface `wan` |
 | `network_list` | `Router có những interface nào?` | Danh sách interface UCI |
 | `wifi_get` | `Tên WiFi là gì?` | SSID, mã hoá, kênh của `ra0` |
-| `route_info` | `Router đang ra Internet bằng đường nào?` | Bảng định tuyến, gateway |
 | `traffic_stats` | `Cổng br-lan đã truyền bao nhiêu dữ liệu?` | Tổng byte/gói cộng dồn |
 
 > **Bẫy đáng test:**
