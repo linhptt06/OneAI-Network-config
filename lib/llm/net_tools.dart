@@ -96,8 +96,7 @@ const String kDefaultTrafficInterface = 'br-lan';
 /// Luôn đọc AP đang bật thay vì radio hoặc interface client/đang tắt.
 const List<String> kWifiSections = [kDefaultWifiSection];
 
-/// Các interface mạng đưa cho model. `wan6` là nửa IPv6 của WAN.
-const List<String> kNetworkInterfaces = ['lan', 'wan', 'wan6'];
+const List<String> kNetworkInterfaces = ['lan', 'wan', 'loopback'];
 
 // ---------------------------------------------------------------------------
 // Tool cục bộ — chạy trên điện thoại, không phải trên router
